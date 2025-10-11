@@ -1,0 +1,20 @@
+{
+  "author_names": "Yuchen Xiao",
+  "author_emails": "yx2924@columbia.edu",
+  "maintainer_names": "Yuchen Xiao",
+  "maintainer_emails": "yx2924@columbia.edu",
+  "maintainer_github_usernames": "ycexiao",
+  "contributors": "Yuchen Xiao",
+  "license_holders": "The Trustees of Columbia University in the City of New York",
+  "project_name": "agenets-for-diffpy",
+  "github_username_or_orgname": "ycexiao",
+  "github_repo_name": "agenets-for-diffpy",
+  "conda_pypi_package_dist_name": "agenets-for-diffpy",
+  "package_dir_name": "agenets_for_diffpy",
+  "project_short_description": "Agents that pick refinement configuration for diffpy",
+  "project_keywords": "diffraction, PDF, X-ray, neutron",
+  "minimum_supported_python_version": "3.11",
+  "maximum_supported_python_version": "3.13",
+  "project_needs_c_code_compiled": "No",
+  "project_has_gui_tests": "No"
+}
