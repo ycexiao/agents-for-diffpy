@@ -11,7 +11,8 @@ from collections import OrderedDict
 from scipy.optimize import least_squares
 from pathlib import Path
 
-# Note on 11/10: How to adjust the number of adp variables? According to the number of scatters?
+# Number of scatterers is not the same for different refinement tasks and there are no upper limit.
+# Set to be 8 for now. Agent can choose to activate/deactivate.
 
 
 class SingleStructurePDFEnv(gym.Env):
@@ -37,6 +38,7 @@ class SingleStructurePDFEnv(gym.Env):
         configurations: Optional[dict]
             A dictionary of configurations for the fitting process, including:
             - spacegroup: str, the space group symbol for constraints
+            - nscatterers: int, number of scatterers in the structure. Default 8
             - instrumental_params: dict, initial values for instrumental parameters, including
                 - qdamp
                 - qbroad
@@ -46,6 +48,9 @@ class SingleStructurePDFEnv(gym.Env):
                 - rstep
             - step_limit: int, maximum number of steps per episode
         """
+        self._nth_step = 0
+        self._step_limit = configurations.get("step_limit", 100)
+        self._nscatterers = configurations.get("nscatterers", 8)
         structure, profile = self._get_structure_and_profile(
             structure, profile, configurations["profile_calculation_params"]
         )
@@ -79,14 +84,11 @@ class SingleStructurePDFEnv(gym.Env):
                 ),
             }
         )
-        self._nth_step = 0
-        self._step_limit = configurations.get("step_limit", 100)
-        self._target_pdf = profile
 
     def _get_obs(self):
         residual = self._recipe.residual()
         simulated_pdf = self._recipe._contributions.values()
-        diff_pdf = simulated_pdf - self._target_pdf
+        diff_pdf = simulated_pdf - self._recipe._contributions.yobs
         return {
             "residual": residual,
             "simulated_pdf": simulated_pdf,
@@ -97,6 +99,16 @@ class SingleStructurePDFEnv(gym.Env):
         pass
 
     def _reset_agent_location(self):
+        self._latpars_names = ["a", "b", "c", "alpha", "beta", "gamma"]
+        self._iso_adppars_names = [
+            f"Uiso_{i}" for i in range(self._nscatterers)
+        ]
+        self._ani_adppars_names = [
+            f"U{j}{k}_{i}"
+            for i in range(self._nscatterers)
+            for j in range(3)
+            for k in range(3)
+        ]
         self._agent_location = OrderedDict(
             {
                 # structure parameters
@@ -109,19 +121,21 @@ class SingleStructurePDFEnv(gym.Env):
                 "gamma": np.random.random() * 120,
                 "delta1": 0,  # r-independent peak broadening parameter
                 "delta2": 0,  # r-dependent peak broadening parameter
-                "Uiso_0": 0,  # isotropic ADP
-                "U11_0": 0,  # anisotropic ADP
-                "U22_0": 0,
-                "U33_0": 0,
-                "U12_0": 0,
-                "U13_0": 0,
-                "U23_0": 0,
                 # dataset parameters
                 "scale": 1,  # scale factor
                 "qdamp": 0,  # Q-damp parameter
                 "qbroad": 0,  # Q-broad parameter
             }
         )
+        for i in range(self._nscatterers):
+            # isotropic ADP
+            self._agent_location[self._iso_adppars_names[i]] = (
+                np.random.random()
+            )
+            # anisotropic ADP
+            for j in range(9):
+                ani_adp_name = self._ani_adppars_names[i * 9 + j]
+                self._agent_location[ani_adp_name] = np.random.random()
 
     def reset(
         self, seed: Optional[int] = None, options: Optional[dict] = None
@@ -161,7 +175,7 @@ class SingleStructurePDFEnv(gym.Env):
     def _make_recipe(
         self,
         structure: Structure,
-        variables: dict,
+        variables_dict: dict,
         profile: Profile,
         spacegroup_constraints: Optional[str] = None,
         instrumental_params: Optional[dict] = None,
@@ -189,18 +203,17 @@ class SingleStructurePDFEnv(gym.Env):
 
         # set variables
         # scale
-        recipe.addVar(contribution.s1, variables["scale"], tag="scale")
+        recipe.addVar(contribution.s1, variables_dict["scale"], tag="scale")
         # space group constraints
         spacegroupparams = None
         if spacegroup_constraints:
-            breakpoint()
             spacegroupparams = constrainAsSpaceGroup(
                 pdfgenerator.phase, spacegroup_constraints
             )
             for par in spacegroupparams.latpars:
                 recipe.addVar(
                     par,
-                    value=variables[par.name],
+                    value=variables_dict[par.name],
                     fixed=True,
                     tag=par.name,
                 )
@@ -208,19 +221,22 @@ class SingleStructurePDFEnv(gym.Env):
                 print(par.name)
                 recipe.addVar(
                     par,
-                    value=variables[par.name],
+                    value=variables_dict[par.name],
                     fixed=True,
                     tag=par.name,
                 )
-            left_variables_name = list(
-                set(variables.keys()) - set(["scale", "lat", "biso", "uij"])
+        left_variables_name = list(
+            set(variables_dict.keys())
+            - set(
+                self._iso_adppars_names
+                + self._ani_adppars_names
+                + self._latpars_names
+                + ["scale"]
             )
-        else:
-            left_variables_name = list(
-                set(variables.keys()) - set(["scale", "lat"])
-            )
+        )
+
         for var_name in left_variables_name:
-            var_value = variables[var_name]
+            var_value = variables_dict[var_name]
             recipe.addVar(
                 getattr(pdfgenerator, var_name),
                 value=var_value,
