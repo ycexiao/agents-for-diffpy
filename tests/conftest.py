@@ -1,19 +1,30 @@
-import json
+import sys
 from pathlib import Path
 
 import pytest
+from diffpy.utils.parsers.loaddata import loadData
+from diffpy.structure import loadStructure
 
 
-@pytest.fixture
-def user_filesystem(tmp_path):
-    base_dir = Path(tmp_path)
-    home_dir = base_dir / "home_dir"
-    home_dir.mkdir(parents=True, exist_ok=True)
-    cwd_dir = base_dir / "cwd_dir"
-    cwd_dir.mkdir(parents=True, exist_ok=True)
+# Import by path. Do need to re-install the package after every change.
+SRC_ROOT = Path(__file__).parents[1].resolve() / "src"
+if SRC_ROOT not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
-    home_config_data = {"username": "home_username", "email": "home@email.com"}
-    with open(home_dir / "diffpyconfig.json", "w") as f:
-        json.dump(home_config_data, f)
 
-    yield tmp_path
+environment_modules_path = SRC_ROOT / "environments"
+if environment_modules_path not in sys.path:
+    sys.path.insert(0, str(environment_modules_path))
+
+TEST_ROOT = Path(__file__).parents[0].resolve()
+
+
+@pytest.fixture()
+def structure_and_profile_path():
+    data_path = TEST_ROOT / "data"
+    out = {}
+    out["Ni"] = {
+        "structure": str(data_path / "Ni.cif"),
+        "profile": str(data_path / "Ni.gr"),
+    }
+    return out
