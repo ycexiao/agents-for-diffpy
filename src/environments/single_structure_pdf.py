@@ -10,9 +10,16 @@ from diffpy.srfit.pdf import PDFParser, PDFGenerator
 from collections import OrderedDict
 from scipy.optimize import least_squares
 from pathlib import Path
+from diffpy.srfit.fitbase.parameter import ParameterProxy
+from helper import recipe_parameters_to_refinement_variales
 
-# Number of scatterers is not the same for different refinement tasks and there are no upper limit.
-# Set to be 8 for now. Agent can choose to activate/deactivate.
+
+# Number of scatterers is not the same for different refinement tasks.
+# Set to be the number of scatters unless space group constraint is set.
+
+# calculated pdf and measured pdf are of different length.
+# changing of rmin, rmax, and rstep also changes the observation space
+# cast it into a (1,100) array
 
 
 class SingleStructurePDFEnv(gym.Env):
@@ -25,9 +32,12 @@ class SingleStructurePDFEnv(gym.Env):
         structure: Union[Structure, str, Path],
         profile: Union[Profile, str, Path],
         configurations: Optional[dict] = None,
+        step_limit=100,
+        profile_length=100,
     ):
         """
         Initialize the environment.
+
         Parameters
         ----------
         structure: Union[Structure, str, Path]
@@ -38,7 +48,6 @@ class SingleStructurePDFEnv(gym.Env):
         configurations: Optional[dict]
             A dictionary of configurations for the fitting process, including:
             - spacegroup: str, the space group symbol for constraints
-            - nscatterers: int, number of scatterers in the structure. Default 8
             - instrumental_params: dict, initial values for instrumental parameters, including
                 - qdamp
                 - qbroad
@@ -46,40 +55,50 @@ class SingleStructurePDFEnv(gym.Env):
                 - rmin
                 - rmax
                 - rstep
-            - step_limit: int, maximum number of steps per episode
+
+        Attributes
+        ----------
+        action_space
+        observation_space
+
+        _step_limit
+        _nth_step
+        _recipe
+        _refinement_variables_dict
+        _profile_length
+
+        Methods
+        ------
+        self.reset
+        self.step
+        self._get_obs
         """
         self._nth_step = 0
-        self._step_limit = configurations.get("step_limit", 100)
-        self._nscatterers = configurations.get("nscatterers", 8)
+        self._step_limit = step_limit
+        self._profile_length = profile_length
         structure, profile = self._get_structure_and_profile(
             structure, profile, configurations["profile_calculation_params"]
         )
-        self._reset_agent_location()
-        self._make_recipe(
+        self._make_recipe_setup_variables(
             structure,
-            self._agent_location,
             profile,
             configurations["spacegroup"],  # used as constraints
             configurations[
                 "instrumental_params"
             ],  # used to set initial values
         )
-        self.action_space = MultiBinary(len(self._agent_location))
+        self.action_space = MultiBinary(
+            len(self._refinement_variables_dict.keys())
+        )
         self.observation_space = Dict(
             {
                 "residual": Box(
                     low=0, high=np.inf, shape=(1,), dtype=np.float32
                 ),
-                "simulated_pdf": Box(
-                    low=-np.inf,
-                    high=np.inf,
-                    shape=(1, len(profile.xobs)),
-                    dtype=np.float32,
-                ),
                 "diff_pdf": Box(
                     low=-np.inf,
                     high=np.inf,
-                    shape=(1, len(profile.xobs)),
+                    shape=(1, self._profile_length),
                     dtype=np.float32,
                 ),
             }
@@ -87,38 +106,41 @@ class SingleStructurePDFEnv(gym.Env):
 
     def _get_obs(self):
         residual = self._recipe.residual()
-        simulated_pdf = self._recipe._contributions.values()
-        diff_pdf = simulated_pdf - self._recipe._contributions.yobs
+        pdf_calc = np.concatenate(
+            [con.profile.ycalc for con in self._recipe._contributions.values()]
+        )
+        pdf_obs = np.concatenate(
+            [con.profile.y for con in self._recipe._contributions.values()]
+        )
+        diff_pdf = pdf_calc - pdf_obs
+        x_old = np.linspace(0, 1, len(diff_pdf))
+        x_new = np.linspace(0, 1, self._profile_length)
+        diff_pdf = np.interp(x_new, x_old, diff_pdf)
+        parameter_names = list(self._refinement_variables_dict.keys())
+        parameter_values = list(self._refinement_variables_dict.values())
+
+        # print(self._refinement_variables_dict)
+        # print(
+        #     recipe_parameters_to_refinement_variales(
+        #         self._recipe._parameters.values()
+        #     )
+        # )
+        # print("\n")
+
         return {
+            "parameter_names": parameter_names,
+            "parameter_values": parameter_values,
             "residual": residual,
-            "simulated_pdf": simulated_pdf,
             "diff_pdf": diff_pdf,
         }
 
     def _get_info(self):
-        pass
+        return None
 
-    def _reset_agent_location(self):
-        self._latpars_names = ["a", "b", "c", "alpha", "beta", "gamma"]
-        self._iso_adppars_names = [
-            f"Uiso_{i}" for i in range(self._nscatterers)
-        ]
-        self._ani_adppars_names = [
-            f"U{j}{k}_{i}"
-            for i in range(self._nscatterers)
-            for j in range(3)
-            for k in range(3)
-        ]
-        self._agent_location = OrderedDict(
+    def _setup_refinement_variables(self):
+        self._refinement_variables_dict = OrderedDict(
             {
                 # structure parameters
-                #   lattice parameters
-                "a": np.random.random() * 20,
-                "b": np.random.random() * 20,
-                "c": np.random.random() * 20,
-                "alpha": np.random.random() * 120,
-                "beta": np.random.random() * 120,
-                "gamma": np.random.random() * 120,
                 "delta1": 0,  # r-independent peak broadening parameter
                 "delta2": 0,  # r-dependent peak broadening parameter
                 # dataset parameters
@@ -127,39 +149,62 @@ class SingleStructurePDFEnv(gym.Env):
                 "qbroad": 0,  # Q-broad parameter
             }
         )
-        for i in range(self._nscatterers):
-            # isotropic ADP
-            self._agent_location[self._iso_adppars_names[i]] = (
-                np.random.random()
+        self.__latpars_names = ["a", "b", "c", "alpha", "beta", "gamma"]
+        self.__iso_adppars_names = [
+            f"Uiso_{i}" for i in range(self._nscatterers)
+        ]
+        self.__ani_adppars_names = [
+            f"U{j+1}{k+1}_{i}"
+            for i in range(self._nscatterers)
+            for j in range(3)
+            for k in range(3)
+        ]
+        if not self._valid_lat_adp_names:
+            self._valid_lat_adp_names = list(
+                self.__latpars_names
+                + self.__iso_adppars_names
+                + self.__ani_adppars_names
             )
-            # anisotropic ADP
-            for j in range(9):
-                ani_adp_name = self._ani_adppars_names[i * 9 + j]
-                self._agent_location[ani_adp_name] = np.random.random()
+        for name in self._valid_lat_adp_names:
+            if name in ["a", "b", "c"]:
+                self._refinement_variables_dict[name] = np.random.random() * 20
+            elif name in ["alpha", "beta", "gamma"]:
+                self._refinement_variables_dict[name] = (
+                    np.random.random() * 120
+                )
+            else:
+                self._refinement_variables_dict[name] = 0
 
     def reset(
         self, seed: Optional[int] = None, options: Optional[dict] = None
     ):
         super().reset(seed=seed)
-        self._reset_agent_location()
+        self._setup_refinement_variables()
         self._nth_step = 0
         observation = self._get_obs()
         info = self._get_info()
+        self._apply_refinement_variables()
         return observation, info
 
     def step(self, action):
         free_variables_index = np.where(action == 1)[0]
-        free_variables_name = [
-            self._agent_location.keys()[i] for i in free_variables_index
+        free_variable_names = [
+            name
+            for i, name in enumerate(self._refinement_variables_dict.keys())
+            if i in free_variables_index
         ]
-
         self._recipe.fix("all")
-        for var_name in free_variables_name:
+        for var_name in free_variable_names:
             self._recipe.free(var_name)
         least_squares(
             self._recipe.residual, self._recipe.values, x_scale="jac"
         )
-        self._agent_location.update(self._recipe._parameters.values())
+        updated_parameters = recipe_parameters_to_refinement_variales(
+            self._recipe._parameters.values()
+        )
+
+        self._refinement_variables_dict.update(updated_parameters)
+
         observation = self._get_obs()
         reward = -observation["residual"]
         info = self._get_info()
@@ -172,10 +217,9 @@ class SingleStructurePDFEnv(gym.Env):
 
         return observation, reward, termination, truncation, info
 
-    def _make_recipe(
+    def _make_recipe_setup_variables(
         self,
         structure: Structure,
-        variables_dict: dict,
         profile: Profile,
         spacegroup_constraints: Optional[str] = None,
         instrumental_params: Optional[dict] = None,
@@ -194,56 +238,68 @@ class SingleStructurePDFEnv(gym.Env):
         # set instrumental parameter values
         if instrumental_params:
             for key, value in instrumental_params.items():
-                attr = getattr(recipe.crystal.G1, key, None)
+                attr = getattr(contribution, key, None)
                 if attr is not None:
                     attr.value = value
 
         # set equation
-        contribution.setEquation("s1*G1")
+        contribution.setEquation("G1")
+
+        # set verbose level
+        for fithook in recipe.fithooks:
+            fithook.verbose = 0
 
         # set variables
-        # scale
-        recipe.addVar(contribution.s1, variables_dict["scale"], tag="scale")
+        self._recipe = recipe
+        self._nscatterers = len(pdfgenerator.phase.getScatterers())
+
+        # variables on contribution
         # space group constraints
-        spacegroupparams = None
         if spacegroup_constraints:
             spacegroupparams = constrainAsSpaceGroup(
                 pdfgenerator.phase, spacegroup_constraints
             )
+            lat_par_names = [par.name for par in spacegroupparams.latpars]
+            adp_par_names = [par.name for par in spacegroupparams.adppars]
+            self._valid_lat_adp_names = lat_par_names + adp_par_names
+            self._setup_refinement_variables()
             for par in spacegroupparams.latpars:
-                recipe.addVar(
+                self._recipe.addVar(
                     par,
-                    value=variables_dict[par.name],
+                    value=self._refinement_variables_dict[par.name],
                     fixed=True,
                     tag=par.name,
                 )
             for par in spacegroupparams.adppars:
-                print(par.name)
-                recipe.addVar(
+                self._recipe.addVar(
                     par,
-                    value=variables_dict[par.name],
+                    value=self._refinement_variables_dict[par.name],
                     fixed=True,
                     tag=par.name,
                 )
-        left_variables_name = list(
-            set(variables_dict.keys())
-            - set(
-                self._iso_adppars_names
-                + self._ani_adppars_names
-                + self._latpars_names
-                + ["scale"]
+            left_variables_name = list(
+                set(self._refinement_variables_dict.keys())
+                - set(self._valid_lat_adp_names)
             )
-        )
+        else:
+            self._setup_refinement_variables()
+            left_variables_name = list(self._refinement_variables_dict.keys())
 
+        # variables on pdfgenerator
         for var_name in left_variables_name:
-            var_value = variables_dict[var_name]
-            recipe.addVar(
+            var_value = self._refinement_variables_dict[var_name]
+            self._recipe.addVar(
                 getattr(pdfgenerator, var_name),
                 value=var_value,
-                fixed=True,
+                fixed=False,
                 tag=var_name,
             )
-        self._recipe = recipe
+
+        self._apply_refinement_variables()
+
+    def _apply_refinement_variables(self):
+        for var in self._recipe._parameters.values():
+            var.setValue(self._refinement_variables_dict[var.name])
 
     def _get_structure_and_profile(
         self, structure, profile, profile_calculation_params

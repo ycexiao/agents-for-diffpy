@@ -7,6 +7,10 @@ from diffpy.srfit.fitbase import FitContribution, FitRecipe, Profile
 from diffpy.srfit.pdf import PDFParser, PDFGenerator
 from diffpy.srfit.structure import constrainAsSpaceGroup
 
+from matplotlib import pyplot as plt
+import numpy as np
+from helper import recipe_parameters_to_refinement_variales
+
 
 @pytest.mark.skipif(True, reason="Coding up other tests")
 def test_iinfo(structure_and_profile_path):
@@ -29,12 +33,14 @@ def test_iinfo(structure_and_profile_path):
     print(spacegroupparams.isosymbol)
     print(spacegroupparams.scatterers)
     print(len(spacegroupparams.scatterers))
+    print(pdfgenerator.phase.getScatterers())
 
 
 # @pytest.mark.skipif(True, reason="Coding up other tests")
 def test_environment_initialization(structure_and_profile_path):
     from single_structure_pdf import SingleStructurePDFEnv
 
+    # Initialization
     env = SingleStructurePDFEnv(
         structure=structure_and_profile_path["Ni"]["structure"],
         profile=structure_and_profile_path["Ni"]["profile"],
@@ -49,4 +55,21 @@ def test_environment_initialization(structure_and_profile_path):
             },
         },
     )
-    pass
+
+    history = np.zeros((env._step_limit, len(env._refinement_variables_dict)))
+
+    # reset
+    observation, info = env.reset()
+    history[0] = observation["parameter_values"]
+
+    # step
+    variables = env._refinement_variables_dict
+    action_vector = np.zeros(len(variables))
+    scale_index = list(variables.keys()).index("scale")
+    action_vector[scale_index] = 1
+    observation, reward, termination, truncation, info = env.step(
+        action_vector
+    )
+    history[1] = observation["parameter_values"]
+    print(observation["parameter_names"])
+    print(history[1] - history[0])
