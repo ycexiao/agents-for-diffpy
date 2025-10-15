@@ -1,11 +1,10 @@
-"""
-Helper funcitons to handle the interface compatibility
-"""
+"""Helper funcitons to handle the interface compatibility."""
 
 from collections import OrderedDict
 from diffpy.srfit.pdf import PDFParser
 from diffpy.srfit.fitbase import Profile
 from diffpy.structure import Structure, loadStructure
+from pathlib import Path
 
 
 def recipe_parameters_to_refinement_variales(parameters: OrderedDict):

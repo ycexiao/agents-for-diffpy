@@ -214,4 +214,3 @@ _atom_site_fract_z
 _atom_site_B_iso_or_equiv
 _atom_site_occupancy
     Ni1    Ni      0.0000    0.0000    0.0000		0.1		1.0
-

@@ -33,9 +33,8 @@ from helper import (
 
 
 class SinglePhase(gym.Env):
-    """
-    A reinforcement learning environment for fitting a single structure to a PDF profile.
-    """
+    """A reinforcement learning environment for fitting a single structure to a
+    PDF profile."""
 
     def __init__(
         self,
@@ -47,17 +46,17 @@ class SinglePhase(gym.Env):
         step_limit=100,
         profile_length=100,
     ):
-        """
-        Initialize the environment.
+        """Initialize the environment.
 
         Parameters
         ----------
         structure: Union[Structure, str, Path]
-            The crystal structure to be fitted. Can be a diffpy Structure object or a path to
-            a structure file (e.g., CIF).
+            The crystal structure to be fitted. Can be a diffpy Structure
+            object or a path to a structure file (e.g., CIF).
 
         profile: Union[Profile, str, Path]
-            The target PDF profile. Can be a diffpy Profile object or a path to a data file.
+            The target PDF profile. Can be a diffpy Profile object or a path
+            to a data file.
 
         configurations: Optional[dict]
             A dictionary of configurations for the fitting process, including:
@@ -67,9 +66,10 @@ class SinglePhase(gym.Env):
             Name of params are fixed.
 
         initial_values: Optional[dict]
-            the intial values for variable parms. It makes less sense since initial values will be
-            overwritten by the action sent by the agent. Nevertheless, it is good to have it
-            so we have more control over the internal process since it is required to initialize
+            the intial values for variable parms. It makes less sense since
+            initial values will be overwritten by the action sent by the
+            agent. Nevertheless, it is good to have it so we have more control
+            over the internal process since it is required to initialize
             the env.
 
         Attributes
@@ -100,7 +100,7 @@ class SinglePhase(gym.Env):
         }
 
         for name in fixed_params:
-            if not name in initial_values.keys():
+            if name not in initial_values.keys():
                 raise ValueError(
                     "Fixed params should have given initial value."
                 )
@@ -142,7 +142,7 @@ class SinglePhase(gym.Env):
         residual = np.interp(x_new, x_old, residual)
         residual = residual.astype(np.float32)
 
-        Rw = results.rw.astype(np.float32)
+        Rw = np.array([results.rw], dtype=np.float32)
         return {
             "Rw": Rw,
             "residual": residual,
@@ -194,7 +194,7 @@ class SinglePhase(gym.Env):
         self._variable_params.update(updated_parameters)
 
         observation = self._get_obs()
-        reward = observation["Rw"]
+        reward = observation["Rw"][0]
         info = self._get_info()
 
         truncation = False
@@ -327,7 +327,10 @@ class SinglePhase(gym.Env):
             else:  # Usio and Uij
                 self._variable_params[name] = 0
 
-        self._variable_params.update(self._initial_values)
+        for key, _ in self._variable_params.items():
+            if key in self._initial_values:
+                self._variable_params[key] = self._initial_values[key]
+
         for key in list(self._variable_params.keys()):
             if key in self._fixed_params.keys():
                 self._variable_params.pop(key)

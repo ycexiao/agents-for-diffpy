@@ -2,8 +2,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from diffpy.utils.parsers.loaddata import loadData
-from diffpy.structure import loadStructure
 
 
 # Import by path. Do need to re-install the package after every change.
