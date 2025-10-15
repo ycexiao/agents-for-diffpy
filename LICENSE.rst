@@ -1,6 +1,6 @@
 BSD 3-Clause License
 
-Copyright (c) 2025, The Trustees of Columbia University in the City of New York.
+Copyright (c) 2025, Yuchen Xiao
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
