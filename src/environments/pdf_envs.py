@@ -28,8 +28,9 @@ from helper import (
 # changing of rmin, rmax, and rstep also changes the observation space
 # cast it into a (1, self._profile_length) array in observation
 
-# How to refine lat and adp without
+# How to get lat and adp vars when there is no constraints?
 #   spacegroupparams = constrainAsSpaceGroup() ?
+# How to refine Qmin and Qmax?
 
 
 class SinglePhase(gym.Env):
@@ -90,20 +91,36 @@ class SinglePhase(gym.Env):
         self.reset
         self.step
         self._get_obs
+        self._get_info
         """
         self._nth_step = 0
         self._step_limit = step_limit
         self._profile_length = profile_length
         self._object_params_map = {
-            "profile": ["xmin", "xmax", "dx"],
+            "profile_fixed": ["xmin", "xmax", "dx"],
+            "generator_fixed": ["Qmin", "Qmax"],
             "generator": ["qdamp", "qbroad", "scale", "delta1", "delta2"],
         }
 
+        fixed_params_if_exist = np.concatenate(
+            [
+                value
+                for key, value in self._object_params_map.items()
+                if key.endswith("_fixed")
+            ]
+        )
+        for key, _ in initial_values.items():
+            if key in fixed_params_if_exist and key not in fixed_params:
+                raise ValueError(
+                    f"{key} must be a fixed param. "
+                    "Add it in the fixed_params"
+                )
         for name in fixed_params:
             if name not in initial_values.keys():
                 raise ValueError(
-                    "Fixed params should have given initial value."
+                    "Fixed params should be given initial values."
                 )
+
         self._fixed_params = {
             name: initial_values[name] for name in fixed_params
         }
@@ -111,7 +128,7 @@ class SinglePhase(gym.Env):
 
         profile_calculation_params = {
             key: self._initial_values[key]
-            for key in self._object_params_map["profile"]
+            for key in self._object_params_map["profile_fixed"]
             if key in self._initial_values.keys()
         }
 
@@ -163,7 +180,7 @@ class SinglePhase(gym.Env):
     ):
         super().reset(seed=seed)
         self._setup_variable_params()
-        self._apply_refinement_variables()
+        self._apply_variabl_params()
         self._nth_step = 0
 
         observation = self._get_obs()
@@ -190,7 +207,6 @@ class SinglePhase(gym.Env):
         updated_parameters = recipe_parameters_to_refinement_variales(
             self._recipe._parameters.values()
         )
-
         self._variable_params.update(updated_parameters)
 
         observation = self._get_obs()
@@ -222,13 +238,18 @@ class SinglePhase(gym.Env):
         recipe.addContribution(contribution)
 
         # set instrumental parameter values
+        if "Qmin" in self._initial_values:
+            pdfgenerator.setQmin(self._initial_values["Qmin"])
+        if "Qmax" in self._initial_values:
+            pdfgenerator.setQmax(self._initial_values["Qmax"])
+
         generator_params = {
             key: self._initial_values[key]
-            for key in self._object_params_map["generator"]
+            for key in self._object_params_map["generator_fixed"]
             if key in self._initial_values.keys()
         }
         for key, value in generator_params.items():
-            attr = getattr(contribution, key, None)
+            attr = getattr(pdfgenerator, key, None)
             if attr is not None:
                 attr.value = value
 
@@ -289,7 +310,7 @@ class SinglePhase(gym.Env):
                 tag=var_name,
             )
 
-        self._apply_refinement_variables()
+        self._apply_variabl_params()
 
     def _setup_variable_params(self):
         self._variable_params = OrderedDict(
@@ -335,6 +356,6 @@ class SinglePhase(gym.Env):
             if key in self._fixed_params.keys():
                 self._variable_params.pop(key)
 
-    def _apply_refinement_variables(self):
+    def _apply_variabl_params(self):
         for var in self._recipe._parameters.values():
             var.setValue(self._variable_params[var.name])
