@@ -1,106 +1,151 @@
+import diffpy
 from mp_api.client import MPRester  # noqa: F401
-import pickle
+import pickle  # noqa: F401
 from diffpy.structure.parsers import getParser
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+import pymatgen
 import random
 from diffpy.srreal.pdfcalculator import PDFCalculator
-from diffpy.srreal import DebyeWallerFactor
-from matplotlib import pyplot as plt
+import numpy as np
+from diffpy.structure.symmetryutilities import SymmetryConstraints
+from diffpy.srfit.structure.sgconstraints import _constraintMap
+from diffpy.srfit.pdf import PDFGenerator
+from diffpy.structure.spacegroups import GetSpaceGroup
 
 
-# with MPRester() as mpr:
-#     docs = mpr.materials.summary.search(material_ids=["mp-149"])
-# docs_data = [doc.model_dump() for doc in docs]
-# with open("tmp.pkl", "wb") as f:
-#     pickle.dump(docs_data, f)
-with open("tmp.pkl", "rb") as f:
-    docs_data = pickle.load(f)
-# print(docs_data[0].keys())
-doc = docs_data[0]
-stru_matgen = doc["structure"]
-sga = SpacegroupAnalyzer(stru_matgen)
-spacegroupnumber = sga.get_space_group_number()
-
-string = stru_matgen.to(fmt="cif")
-stru = getParser("cif").parse(string)
-perturbed_structure = stru
-
-# -------------------------
-# 2. Randomly perturb lattice parameters
-# -------------------------
-# (small random variations around ±2%)
-lat = perturbed_structure.lattice
-perturb_frac = 0.02  # ±2%
-lat.setLatPar(
-    lat.a * (1 + random.uniform(-perturb_frac, perturb_frac)),
-    lat.b * (1 + random.uniform(-perturb_frac, perturb_frac)),
-    lat.c * (1 + random.uniform(-perturb_frac, perturb_frac)),
-    lat.alpha * (1 + random.uniform(-perturb_frac, perturb_frac)),
-    lat.beta * (1 + random.uniform(-perturb_frac, perturb_frac)),
-    lat.gamma * (1 + random.uniform(-perturb_frac, perturb_frac)),
-)
-
-# -------------------------
-# 3. Randomly perturb atomic Uiso or Uij
-# -------------------------
-for atom in perturbed_structure:
-    if atom.U is not None:
-        atom.U = [
-            [u + random.uniform(-0.001, 0.001) for u in row] for row in atom.U
-        ]
-    else:
-        atom.Uiso = abs(random.gauss(0.005, 0.002))  # assign new Uiso
-
-# -------------------------
-# 4. Set up the PDF calculator
-# -------------------------
-pdfcalc = PDFCalculator()
-dwf = DebyeWallerFactor()
-pdfcalc.addContribution(dwf)  # << this makes Uiso matter
-pdfcalc = PDFCalculator()
-pdfcalc.rmin = 0.0
-pdfcalc.rmax = 20.0
-pdfcalc.rstep = 0.01
-
-# -------------------------
-# 5. Randomly perturb PDF parameters
-# -------------------------
-pdfcalc.delta1 = abs(random.gauss(0.0, 0.05))  # correlated motion
-pdfcalc.delta2 = abs(random.gauss(0.0, 0.05))  # uncorrelated motion
-pdfcalc.qdamp = abs(random.gauss(0.03, 0.005))
-pdfcalc.qbroad = abs(random.gauss(0.05, 0.01))
-pdfcalc.scale = random.uniform(0.8, 1.2)
-
-# -------------------------
-# 6. Compute the perturbed PDF
-# -------------------------
-r, G = pdfcalc(perturbed_structure)
-
-# -------------------------
-# 7. Plot the result
-# -------------------------
-plt.plot(r, G, label="PDF with Debye–Waller Broadening")
-plt.xlabel("r (Å)")
-plt.ylabel("G(r)")
-plt.title("PDF with Uiso Effects (Debye–Waller)")
-plt.legend()
-plt.show()
-
-# Optional: print parameters for record
-print("Applied perturbations:")
-print(f"  delta1 = {pdfcalc.delta1:.4f}")
-print(f"  delta2 = {pdfcalc.delta2:.4f}")
-print(f"  qdamp  = {pdfcalc.qdamp:.4f}")
-print(f"  qbroad = {pdfcalc.qbroad:.4f}")
-print(f"  scale  = {pdfcalc.scale:.4f}")
-print(
-    "  a,b,c, alpha, beta, gamma= "
-    f" {lat.a:.3f}, {lat.b:.3f}, {lat.c:.3f}, "
-    f"{lat.alpha:.2f}, {lat.beta:.2f}, {lat.gamma:.2f}"
-)
+def get_constraint_info(
+    pmg_structure: pymatgen.core.Structure,
+    dp_structure: diffpy.structure.Structure,
+) -> dict:
+    """Get symmetry constraint information from a pymatgen Structure."""
+    # Get spacegroup number
+    sgn = SpacegroupAnalyzer(pmg_structure).get_space_group_number()
+    sg = GetSpaceGroup(sgn)
+    # Get variable ADP parameters
+    pdfgenerator = PDFGenerator()
+    pdfgenerator.setStructure(dp_structure, periodic=True)
+    scatterers = pdfgenerator.phase.getScatterers()
+    positions = []
+    adpsymbols = ["Uiso", "U11", "U22", "U33", "U12", "U13", "U23"]
+    for sidx, scatterer in enumerate(scatterers):
+        pars = [scatterer.get(symbol) for symbol in adpsymbols]
+        if None in pars:
+            continue
+        xyz = [scatterer.x, scatterer.y, scatterer.z]
+        positions.append([p.value for p in xyz])
+    g = SymmetryConstraints(sg, positions)
+    free_adpnames = [name for name, val in g.Upars]
+    fadp = g.UFormulas(free_adpnames)
+    # Get variable lattice parameters
+    lattice = pdfgenerator.phase.getLattice()
+    system = sg.crystal_system
+    if not system:
+        system = "Triclinic"
+    system = system.title()
+    f = _constraintMap[system]
+    f(lattice)
+    lat_pars = [
+        lattice.a,
+        lattice.b,
+        lattice.c,
+        lattice.alpha,
+        lattice.beta,
+        lattice.gamma,
+    ]
+    lat_pars = [p.name for p in lat_pars if not p.const and not p.constrained]
+    return sgn, lat_pars, (free_adpnames, fadp)
 
 
-# string = doc["structure"].to(fmt="cif")
-# cifparser = getParser("cif")
-# stru = cifparser.parse(string)
-# print(stru.lattice.spacegroup)
+def fetch_mp_structure():
+    """Fetch structure from Materials Project by material ID."""
+    with MPRester() as mpr:
+        docs = mpr.materials.summary.search(
+            elements=[
+                "Li",
+                "Na",
+                "K",
+                "Mg",
+                "Ca",
+                "Ti",
+                "Ni",
+                "Co",
+                "Cu",
+                "Zn",
+                "Fe",
+                "Mn",
+                "Al",
+                "Si",
+                "P",
+                "Sn",
+                "Sb",
+                "Cr",
+                "Pb",
+                "V",
+            ],
+            energy_above_hull=(0, 0.05),  # stable or nearly stable
+            num_elements=(1, 5),  # optional: 1-3 elements
+            fields=[
+                "nsites",
+                "material_id",
+                "structure",
+                "formula_pretty",
+            ],
+            chunk_size=1000,
+            num_chunks=20,
+        )
+    return docs
+
+
+def add_meta_data(docs):
+    for doc in docs:
+        pmg_struct = doc["structure"]
+        dp_struct = getParser("cif").parse(pmg_struct.to(fmt="cif"))
+        doc["diffpy_structure"] = dp_struct
+        spacegroup_number, lat_names, adp_names = get_constraint_info(
+            pmg_struct, dp_struct
+        )
+        doc["spacegroup_number"] = spacegroup_number
+        doc["lat_names"] = lat_names
+        doc["adp_names"] = adp_names
+    return docs
+
+
+def do_experiment(doc, lat_perturb_frac=0.02, adp_perturb_frac=0.001):
+    pmg_struct = doc["structure"]
+    dp_struct = getParser("cif").parse(pmg_struct.to(fmt="cif"))
+    lat = dp_struct.lattice
+    latpar_names = ["a", "b", "c", "alpha", "beta", "gamma"]
+    latpar_value = [
+        (
+            getattr(lat, name)
+            if name not in doc["lat_names"]
+            else getattr(lat, name)
+            * (1 + random.uniform(-lat_perturb_frac, lat_perturb_frac))
+        )
+        for name in latpar_names
+    ]
+    lat.setLatPar(*latpar_value)
+    n_free_adp = len(doc["adp_names"][0])
+    adppar_value = [
+        (np.random.rand() + 0.001) * adp_perturb_frac
+        for _ in range(n_free_adp)
+    ]
+    adppar_dict = dict(zip(doc["adp_names"][0], adppar_value))
+    # adppar_names = ['U11','U22','U33','U12','U13','U23']
+    for i, atom in enumerate(dp_struct):
+        U = doc["adp_names"][1][i]
+        for key, value in U:
+            if value in adppar_dict:
+                U[key] = adppar_dict[value]
+        atom._U = [[U[0], U[3], U[4]], [U[3], U[1], U[5]], [U[4], U[5], U[2]]]
+    pdfcalc = PDFCalculator()
+    pdfcalc.rmin = 0.0
+    pdfcalc.rmax = 20.0
+    pdfcalc.rstep = 0.01
+    pdfcalc.delta1 = abs(random.gauss(0.0, 0.05))  # correlated motion
+    pdfcalc.delta2 = abs(random.gauss(0.0, 0.05))  # uncorrelated motion
+    pdfcalc.qdamp = abs(random.gauss(0.03, 0.005))
+    pdfcalc.qbroad = abs(random.gauss(0.05, 0.01))
+    pdfcalc.scale = random.uniform(0.8, 1.2)
+    r, G = pdfcalc(dp_struct)
+    return r, G
