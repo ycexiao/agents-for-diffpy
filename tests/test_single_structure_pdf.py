@@ -5,9 +5,7 @@ from diffpy.srfit.fitbase import Profile
 from diffpy.srfit.pdf import PDFParser, PDFGenerator
 
 import gymnasium as gym
-import environments
-
-from matplotlib import pyplot as plt
+import environments  # noqa: F401
 import time
 
 
@@ -76,7 +74,6 @@ def test_Ni_bulk(structure_and_profile_path):
         },
         fixed_params=["xmin", "xmax", "dx", "Qmin", "Qmax"],
         initial_values={
-            "a": 3.52,
             "xmin": 1.5,
             "xmax": 50.0,
             "dx": 0.01,
@@ -95,6 +92,7 @@ def test_Ni_bulk(structure_and_profile_path):
     Rws = []
     # reset
     observation, info = env.reset()
+    print(info["variable-params"])
     Rws.append(observation["Rw"][0])
 
     # Agent made the following decisions
@@ -111,15 +109,16 @@ def test_Ni_bulk(structure_and_profile_path):
         Rws.append(observation["Rw"][0])
         current_time = time.time()
         print(f"{i}-th iteraction cost {current_time-last_time} seconds.")
+        print(info["variable-params"])
         last_time = time.time()
         if termination or truncation:
             break
     # print(Rws)
-    fig, ax = plt.subplots()
-    ax.plot(range(len(Rws)), Rws)
-    ax.set_ylabel("Rw")
-    ax.set_xlabel("Step")
-    plt.show()
+    # fig, ax = plt.subplots()
+    # ax.plot(range(len(Rws)), Rws)
+    # ax.set_ylabel("Rw")
+    # ax.set_xlabel("Step")
+    # plt.show()
 
 
 """

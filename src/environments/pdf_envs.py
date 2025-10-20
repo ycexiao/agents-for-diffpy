@@ -81,6 +81,7 @@ class SinglePhase(gym.Env):
         _initial_values
         _fixed_params
         _variable_params
+        _default_stru_params
         _step_limit
         _nth_step
         _recipe
@@ -101,7 +102,19 @@ class SinglePhase(gym.Env):
             "generator_fixed": ["Qmin", "Qmax"],
             "generator": ["qdamp", "qbroad", "scale", "delta1", "delta2"],
         }
-
+        profile_calculation_params = {
+            key: initial_values[key]
+            for key in self._object_params_map["profile_fixed"]
+            if key in initial_values.keys()
+        }
+        structure, profile = get_structure_and_profile(
+            structure, profile, profile_calculation_params
+        )
+        latpars_names = ["a", "b", "c", "alpha", "beta", "gamma"]
+        self._initial_values = {
+            name: getattr(structure.lattice, name) for name in latpars_names
+        }
+        self._initial_values.update(initial_values)
         fixed_params_if_exist = np.concatenate(
             [
                 value
@@ -120,21 +133,9 @@ class SinglePhase(gym.Env):
                 raise ValueError(
                     "Fixed params should be given initial values."
                 )
-
         self._fixed_params = {
             name: initial_values[name] for name in fixed_params
         }
-        self._initial_values = initial_values
-
-        profile_calculation_params = {
-            key: self._initial_values[key]
-            for key in self._object_params_map["profile_fixed"]
-            if key in self._initial_values.keys()
-        }
-
-        structure, profile = get_structure_and_profile(
-            structure, profile, profile_calculation_params
-        )
 
         self._make_recipe_setup_params(structure, profile, configurations)
         self.action_space = MultiBinary(len(self._variable_params.keys()))
@@ -324,11 +325,9 @@ class SinglePhase(gym.Env):
                 "qbroad": 0,  # Q-broad parameter
             }
         )
-        self.__latpars_names = ["a", "b", "c", "alpha", "beta", "gamma"]
-        self.__iso_adppars_names = [
-            f"Uiso_{i}" for i in range(self._nscatterers)
-        ]
-        self.__ani_adppars_names = [
+        latpars_names = ["a", "b", "c", "alpha", "beta", "gamma"]
+        iso_adppars_names = [f"Uiso_{i}" for i in range(self._nscatterers)]
+        ani_adppars_names = [
             f"U{j+1}{k+1}_{i}"
             for i in range(self._nscatterers)
             for j in range(3)
@@ -336,9 +335,7 @@ class SinglePhase(gym.Env):
         ]
         if not self._valid_lat_adp_names:
             self._valid_lat_adp_names = list(
-                self.__latpars_names
-                + self.__iso_adppars_names
-                + self.__ani_adppars_names
+                latpars_names + iso_adppars_names + ani_adppars_names
             )
         for name in self._valid_lat_adp_names:
             if name in ["a", "b", "c"]:
