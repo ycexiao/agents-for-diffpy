@@ -36,3 +36,14 @@ def get_structure_and_profile(structure, profile, profile_calculation_params):
     structure = ensure_obj_type(structure, Structure, loadStructure)
     profile = ensure_obj_type(profile, Profile, data_to_profile)
     return structure, profile
+
+
+def adpmatrix_from_ij(U_dict):
+    """Create ADP matrix from Uij components."""
+    U11 = U_dict.get("U11", 0)
+    U22 = U_dict.get("U22", 0)
+    U33 = U_dict.get("U33", 0)
+    U12 = U_dict.get("U12", 0)
+    U13 = U_dict.get("U13", 0)
+    U23 = U_dict.get("U23", 0)
+    return [[U11, U12, U13], [U12, U22, U23], [U13, U23, U33]]
