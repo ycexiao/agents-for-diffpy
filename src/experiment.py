@@ -1,5 +1,4 @@
 import numpy as np
-import pickle
 import random
 
 from mp_api.client import MPRester
@@ -7,9 +6,7 @@ import pymatgen
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 import diffpy
-from diffpy.structure import loadStructure, Structure
 from diffpy.structure.symmetryutilities import SymmetryConstraints
-from diffpy.structure.parsers import getParser
 from diffpy.structure.spacegroups import GetSpaceGroup
 from diffpy.srfit.pdf import PDFGenerator
 from diffpy.srfit.equation.builder import EquationFactory
@@ -70,6 +67,8 @@ class PDFExperiment:
 
     def set_symmertry_constraints(self):
         dp_structure = self.structure
+        cif_string = dp_structure.writeStr(format="cif")
+        pmg_structure = pymatgen.core.Structure.from_str(cif_string, fmt="cif")
         # Get spacegroup number(How to do it without pymatgen?)
         sgn = SpacegroupAnalyzer(pmg_structure).get_space_group_number()
         sg = GetSpaceGroup(sgn)
