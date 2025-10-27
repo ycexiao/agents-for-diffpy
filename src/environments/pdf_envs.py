@@ -30,6 +30,7 @@ from helper import (
 
 # How to get lat and adp vars when there is no constraints?
 #   spacegroupparams = constrainAsSpaceGroup() ?
+
 # How to refine Qmin and Qmax?
 
 

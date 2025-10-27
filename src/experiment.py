@@ -1,22 +1,28 @@
-import diffpy  # noqa: F401
-from mp_api.client import MPRester  # noqa: F401
-import pickle  # noqa: F401
-from diffpy.structure.parsers import getParser
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-import pymatgen
-import random
-from diffpy.srreal.pdfcalculator import PDFCalculator
 import numpy as np
+import pickle
+import random
+
+from mp_api.client import MPRester
+import pymatgen
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+import diffpy
+from diffpy.structure import loadStructure, Structure
 from diffpy.structure.symmetryutilities import SymmetryConstraints
-from diffpy.srfit.pdf import PDFGenerator
+from diffpy.structure.parsers import getParser
 from diffpy.structure.spacegroups import GetSpaceGroup
+from diffpy.srfit.pdf import PDFGenerator
 from diffpy.srfit.equation.builder import EquationFactory
+from diffpy.srreal.pdfcalculator import PDFCalculator
 
 from helper import adpmatrix_from_ij
 
+# The output string from pymatgen is not periodic that can be used
+# directly in PDFCalculator.
+# Need to get rid of pymatgen
+
 
 def fetch_mp_structure():
-    """Fetch structure from Materials Project by material ID."""
     with MPRester() as mpr:
         docs = mpr.materials.summary.search(
             elements=[
@@ -37,15 +43,20 @@ def fetch_mp_structure():
 
 
 class PDFExperiment:
-    def __init__(self, structure, rmin=0.0, rmax=20.0, rstep=0.01):
+    def __init__(
+        self,
+        structure: diffpy.structure.Structure,
+        rmin=0.0,
+        rmax=20.0,
+        rstep=0.01,
+    ):
         self.structure = structure
         self.pdfcalc = PDFCalculator()
         self.pdfcalc.rmin = rmin
         self.pdfcalc.rmax = rmax
         self.pdfcalc.rstep = rstep
         self.remember_original_parameters()
-        self.process_structure()
-        self.get_symmetry_constraints()
+        self.set_symmertry_constraints()
 
     def remember_original_parameters(self):
         self.latpar = {
@@ -57,26 +68,9 @@ class PDFExperiment:
             "gamma": self.structure.lattice.gamma,
         }
 
-    def process_structure(self):
-        if isinstance(self.structure, pymatgen.core.Structure):
-            self.structure_pmg = self.structure
-            self.structure = getParser("cif").parse(
-                self.structure.to(fmt="cif")
-            )
-        elif isinstance(self.structure, str):
-            self.structure = getParser("cif").parse(self.structure)
-            self.structure_pmg = pymatgen.core.Structure.from_str(
-                self.structure.toString("cif"), fmt="cif"
-            )
-        else:
-            raise ValueError(
-                f"Unsupported structure type: {type(self.structure)}"
-            )
-
-    def get_symmetry_constraints(self):
-        pmg_structure = self.structure_pmg
+    def set_symmertry_constraints(self):
         dp_structure = self.structure
-        # Get spacegroup number
+        # Get spacegroup number(How to do it without pymatgen?)
         sgn = SpacegroupAnalyzer(pmg_structure).get_space_group_number()
         sg = GetSpaceGroup(sgn)
         # Get variable ADP parameters
@@ -170,8 +164,11 @@ class PDFExperiment:
                 self.pdfcalc.delta1 = abs(random.gauss(0, magnitude))
 
     def generate(self):
-        self.reset()
-        r, G = self.pdfcalc(self.structure)
+        pdfcalc = PDFCalculator(qmax=25.0, qmin=0.5, rmin=0.0, rmax=20.0)
+        pdfcalc.qdamp = 0.04
+        pdfcalc.qbroad = 0.02
+        # r, G = self.pdfcalc(self.structure)
+        r, G = pdfcalc(self.structure)
         return r, G
 
     def reset(self):
@@ -188,7 +185,6 @@ class PDFExperiment:
             atom.U = None
 
     def get_constrained_lat(self, system):
-        print(system)
         flat_name = ["a", "b", "c", "alpha", "beta", "gamma"]
         flats = {
             "Cubic": ["a", "a", "a", None, None, None],
