@@ -1,14 +1,15 @@
 import networkx as nx
 import uuid
+from BaseAdapter import BaseAdapter
 
 
 class FitDiag:
     "A directed acyclic graph (DAG) representing fitting instructions."
 
-    def __init__(self, runner):
-        self.init_from_runner(runner)
+    def __init__(self, adapter=BaseAdapter):
+        self.init_from_adapter(adapter)
 
-    def init_from_runner(self, runner):
+    def init_from_adapter(self, adapter):
         """
         Initialize the fitting diagram from a runner object.
 
@@ -19,7 +20,7 @@ class FitDiag:
             It should have an attribute 'allowed_actions' which is a dict
             mapping action names to the corresponding methods
         """
-        self.allowed_actions = runner.allowed_actions
+        self.allowed_actions = adapter.parameter_names
 
     def from_dict(self, data):
         """

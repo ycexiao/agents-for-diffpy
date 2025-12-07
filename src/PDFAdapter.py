@@ -39,10 +39,13 @@ class PDFAdapter(BaseAdapter):
     residual: callable
         The current residual function.
     initial_values: dict
-        A dictionary of initial parameter values for residual function.
+        The dictionary of initial parameter values for residual function.
     parameters: dict
-        A dictionary of parameter objects (both fixed and free) used in the
+        The dictionary of parameter objects (both fixed and free) used in the
         fitting model.
+    parameters_slots: list
+        The sorted list of all parameter names used in ML/RL model. The
+        parameter name might not appear in the sepcific structure model.
 
     Attributes
     ----------
@@ -54,7 +57,7 @@ class PDFAdapter(BaseAdapter):
     _pname_parameter_dict : dict
         A dictionary mapping parameter names to their corresponding
         objects in the fitting model.
-    _possible_parameter_names_group : dict
+    _parameter_names_group : dict
         A dictionary grouping parameter names by their categories.
     _parameters_ready : bool
         Flag indicating whether parameters have been initialized and bound.
@@ -67,10 +70,6 @@ class PDFAdapter(BaseAdapter):
         Free parameters given their names.
     show_parameters()
         Show current parameter values and their fix/free status.
-    _apply_parameter_values(pv_dict: dict)
-        Apply all parameter values from the provided dictionary.
-    _update_parameter_values(pv_dict: dict)
-        Only update given parameter values based on the provided dictionary.
     """
 
     def __init__(self, **inputs):
@@ -105,6 +104,33 @@ class PDFAdapter(BaseAdapter):
             )
         else:
             return self._pname_parameter_dict
+
+    @property
+    def parameter_names(self):
+        return sorted(list(self.parameters.keys()))
+
+    @property
+    def parameters_slots(self):
+        static_parameter_groups = [
+            "generator_parameters",
+            "structure_lattice_parameters",
+        ]
+        parameter_names_slots = []
+        for group in static_parameter_groups:
+            parameter_names_slots.extend(
+                self._possible_parameter_names_group[group]
+            )
+        max_atoms = 64
+        for i in range(max_atoms):
+            parameter_names_slots.append(f"x_{i}")
+            parameter_names_slots.append(f"y_{i}")
+            parameter_names_slots.append(f"z_{i}")
+            parameter_names_slots.append(f"U11_{i}")
+            parameter_names_slots.append(f"U22_{i}")
+            parameter_names_slots.append(f"U33_{i}")
+            parameter_names_slots.append(f"U12_{i}")
+            parameter_names_slots.append(f"U13_{i}")
+            parameter_names_slots.append(f"U23_{i}")
 
     def _load_inputs(self, profile_path: str, structure_path: str):
         """
@@ -147,11 +173,11 @@ class PDFAdapter(BaseAdapter):
                 "beta",
                 "gamma",
             ],
-            "structure_atom_xyz_parameters": (
-                [f"x_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"y_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"z_{i}" for i in range(len(self._inputs["structure"]))]
-            ),
+            # "structure_atom_xyz_parameters": (
+            #     [f"x_{i}" for i in range(len(self._inputs["structure"]))]
+            #     + [f"y_{i}" for i in range(len(self._inputs["structure"]))]
+            #     + [f"z_{i}" for i in range(len(self._inputs["structure"]))]
+            # ),
             "structure_atom_U_parameters": (
                 [f"U11_{i}" for i in range(len(self._inputs["structure"]))]
                 + [f"U22_{i}" for i in range(len(self._inputs["structure"]))]
@@ -295,27 +321,6 @@ class PDFAdapter(BaseAdapter):
             )
         self._residual_factory_components["recipe"].fix("all")
         self._parameters_ready = True
-
-    def _apply_parameters(self, pv_dict: dict):
-        """
-        Apply all parameter values from the provided dictionary.
-        Raise KeyError if any parameter is missing.
-        """
-        for pname, parameter in self.parameters.items():
-            if pname not in pv_dict:
-                continue
-            parameter.setValue(pv_dict[pname])
-
-    def _update_parameters(self, pv_dict: dict):
-        """
-        Only update given parameter values based on the provided dictionary to
-        speed up the computing process.
-        """
-        for pname, pvalue in pv_dict.items():
-            if pname not in self.parameters:
-                raise KeyError(f"Parameter {pname} not found in the model.")
-            parameter = self.parameters[pname]
-            parameter.setValue(pvalue)
 
     def fix_parameters(self, parameter_names):
         """
