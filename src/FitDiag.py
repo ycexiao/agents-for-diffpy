@@ -20,7 +20,7 @@ class FitDiag:
             It should have an attribute 'allowed_actions' which is a dict
             mapping action names to the corresponding methods
         """
-        self.allowed_actions = adapter.parameter_names
+        self.allowed_actions = list(adapter.parameter.keys())
 
     def from_dict(self, data):
         """

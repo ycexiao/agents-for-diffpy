@@ -106,11 +106,7 @@ class PDFAdapter(BaseAdapter):
             return self._pname_parameter_dict
 
     @property
-    def parameter_names(self):
-        return sorted(list(self.parameters.keys()))
-
-    @property
-    def parameters_slots(self):
+    def pparameter_values_in_slots(self):
         static_parameter_groups = [
             "generator_parameters",
             "structure_lattice_parameters",
@@ -131,6 +127,21 @@ class PDFAdapter(BaseAdapter):
             parameter_names_slots.append(f"U12_{i}")
             parameter_names_slots.append(f"U13_{i}")
             parameter_names_slots.append(f"U23_{i}")
+        parameter_values_in_slots = numpy.zeros(len(parameter_names_slots))
+        for pname in self.parameters.keys():
+            if pname in parameter_names_slots:
+                index = parameter_names_slots.index(pname)
+                parameter_values_in_slots[index] = self.parameters[pname].value
+            elif pname.startswith("Uiso"):
+                suffix = pname.split("Uiso")[-1]
+                u11_name = f"U11{suffix}"
+                index = parameter_names_slots.index(u11_name)
+                parameter_values_in_slots[index] = self.parameters[pname].value
+            else:
+                raise KeyError(
+                    f"Parameter {pname} not found in the parameter slots."
+                )
+        return parameter_values_in_slots
 
     def _load_inputs(self, profile_path: str, structure_path: str):
         """

@@ -29,15 +29,7 @@ class BaseAdapter(ABC):
 
     @property
     @abstractmethod
-    def parameter_names(self):
-        """
-        Return a sorted list of all parameter names.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def parameters_slots(self):
+    def parameter_values_in_slots(self):
         """
         Return a sorted list of all parameter names used in ML/RL model.
         The parameter name might not appear in the specific structure model.
