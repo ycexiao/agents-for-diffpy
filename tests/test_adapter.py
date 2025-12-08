@@ -10,17 +10,14 @@ def test_adapter_workflow():
     profile_path = Path().cwd() / "data" / "Ni.gr"
     structure_path = Path().cwd() / "data" / "Ni.cif"
     adapter = PDFAdapter(
-        profile_path=str(profile_path), structure_path=str(structure_path)
+        profile_path=str(profile_path),
+        structure_path=str(structure_path),
+        Qmax=25.0,
+        Qmin=0.5,
     )
-    # C1: fix, free, and show parameters
-    adapter.free_parameters(["scale"])
-    assert adapter._residual_factory_components["recipe"].isFree(
-        adapter._residual_factory_components["recipe"].get("scale")
-    )
-    adapter.fix_parameters(["all"])
-    adapter.show_parameters()
-    # C2: Set initial parameter values
-    adapter._update_parameters(
+    # Set initial parameter values
+    adapter.free_parameters(["all"])
+    adapter.apply_pv_dict(
         {
             "scale": 0.4,
             "a": 3.52,
@@ -30,12 +27,14 @@ def test_adapter_workflow():
             "qbroad": 0.02,
         }
     )
-    assert (
-        adapter._residual_factory_components["recipe"].get("scale").value
-        == 0.4
-    )
+    adapter.fix_parameters(["all"])
     # C3: perform fitting steps
     steps = ["a", "scale", "Uiso_0", "delta2", "qdamp", "qbroad"]
+    # result = least_squares(
+    #     adapter._recipe.residual,
+    #     adapter._recipe.values,
+    #     x_scale="jac",
+    # )
     for step in steps:
         adapter.free_parameters([step])
         result = least_squares(

@@ -1,5 +1,3 @@
-from typing import Optional, Union
-from diffpy.structure import Structure
 from diffpy.srfit.pdf import PDFParser
 from diffpy.srfit.fitbase import Profile
 from diffpy.srfit.structure import constrainAsSpaceGroup
@@ -11,15 +9,17 @@ from diffpy.srfit.fitbase import (
     FitResults,
 )
 from diffpy.srfit.pdf import PDFGenerator
-from collections import OrderedDict
-from scipy.optimize import least_squares
 from pathlib import Path
-import copy
 import numpy
 from BaseAdapter import BaseAdapter
 
+# xyz_par is constrained or not when symmetry condition is imposed?
+# What happended whe "P1" is given? What is the difference of setting "P1"
+#   and not setting spacegroup at all?
+# setQmax and setQmin for PDFGenerator?
 
-class PDFAdapter(BaseAdapter):
+
+class PDFAdapter:
     """
     Adapter to expose PDF fitting interface for FitRunner.
 
@@ -41,24 +41,24 @@ class PDFAdapter(BaseAdapter):
     initial_values: dict
         The dictionary of initial parameter values for residual function.
     parameters: dict
-        The dictionary of parameter objects (both fixed and free) used in the
-        fitting model.
-    parameters_slots: list
-        The sorted list of all parameter names used in ML/RL model. The
-        parameter name might not appear in the sepcific structure model.
+        The dictionary of parameter objects (both fixed and free) used in
+        the current instance.
+    parameter_slots_mask: list
+        The boolean mask list indicating which parameters in
+        `parameters_names_in_slots` are present in the current model.
+    parameter_names_in_slots: list
+        The sorted list of all parameter names used in ML/RL model.
+        The parameter name might not appear in the specific structure model.
+    parameter_values_in_slots: list
+        The sorted list of all parameter names used in ML/RL model.
+        The parameter name might not appear in the specific structure model.
 
     Attributes
     ----------
     _inputs : dict
         A dictionary containing loaded 'structure' and 'profile' objects.
-    _residual_factory_components : dict
-        A dictionary containing components used to build the residual
-        function.
-    _pname_parameter_dict : dict
-        A dictionary mapping parameter names to their corresponding
-        objects in the fitting model.
-    _parameter_names_group : dict
-        A dictionary grouping parameter names by their categories.
+    _recipe : FitRecipe
+        The FitRecipe object managing the fitting process.
     _parameters_ready : bool
         Flag indicating whether parameters have been initialized and bound.
 
@@ -78,70 +78,76 @@ class PDFAdapter(BaseAdapter):
             profile_path=inputs.pop("profile_path"),
             structure_path=inputs.pop("structure_path"),
         )
-        self._init_parameters()
-        self._init_residual_factory(
+        self._make_recipe(
             xmin=inputs.get("xmin", None),
             xmax=inputs.get("xmax", None),
             dx=inputs.get("dx", None),
+            Qmin=inputs.get("qmin", None),
+            Qmax=inputs.get("qmax", None),
         )
-        self._impose_symmertry_constraints(inputs.get("spacegroup", None))
-        self._bind_model_parameters()
 
     @property
     def residual(self):
-        return self._residual_factory_components["recipe"].residual
+        return self._recipe.residual
 
     @property
     def initial_values(self):
-        return self._residual_factory_components["recipe"].values
+        return self._recipe.values
 
     @property
     def parameters(self):
-        if not self._parameters_ready:
-            raise RuntimeError(
-                "Parameters are not ready. Ensure parameters are "
-                "initialized and bound before accessing."
-            )
-        else:
-            return self._pname_parameter_dict
+        return self._recipe._parameters
 
     @property
-    def pparameter_values_in_slots(self):
-        static_parameter_groups = [
-            "generator_parameters",
-            "structure_lattice_parameters",
+    def parameters_names_in_slots(self):
+        names = [
+            "qdamp",
+            "qbroad",
+            "scale",
+            "delta1",
+            "delta2",
+            "a",
+            "b",
+            "c",
+            "alpha",
+            "beta",
+            "gamma",
         ]
-        parameter_names_slots = []
-        for group in static_parameter_groups:
-            parameter_names_slots.extend(
-                self._possible_parameter_names_group[group]
-            )
         max_atoms = 64
         for i in range(max_atoms):
-            parameter_names_slots.append(f"x_{i}")
-            parameter_names_slots.append(f"y_{i}")
-            parameter_names_slots.append(f"z_{i}")
-            parameter_names_slots.append(f"U11_{i}")
-            parameter_names_slots.append(f"U22_{i}")
-            parameter_names_slots.append(f"U33_{i}")
-            parameter_names_slots.append(f"U12_{i}")
-            parameter_names_slots.append(f"U13_{i}")
-            parameter_names_slots.append(f"U23_{i}")
-        parameter_values_in_slots = numpy.zeros(len(parameter_names_slots))
-        for pname in self.parameters.keys():
-            if pname in parameter_names_slots:
-                index = parameter_names_slots.index(pname)
-                parameter_values_in_slots[index] = self.parameters[pname].value
-            elif pname.startswith("Uiso"):
-                suffix = pname.split("Uiso")[-1]
-                u11_name = f"U11{suffix}"
-                index = parameter_names_slots.index(u11_name)
-                parameter_values_in_slots[index] = self.parameters[pname].value
-            else:
-                raise KeyError(
-                    f"Parameter {pname} not found in the parameter slots."
-                )
-        return parameter_values_in_slots
+            names.extend(
+                [
+                    f"x_{i}",
+                    f"y_{i}",
+                    f"z_{i}",
+                    f"Uiso_{i}",
+                    f"U11_{i}",
+                    f"U22_{i}",
+                    f"U33_{i}",
+                    f"U12_{i}",
+                    f"U13_{i}",
+                    f"U23_{i}",
+                ]
+            )
+        return names
+
+    @property
+    def parameters_slots_mask(self):
+        mask = numpy.zeros(len(self.parameters_names_in_slots), dtype=bool)
+        for pname in self.parameters:
+            if pname in self.parameters_names_in_slots:
+                index = self.parameters_names_in_slots.index(pname)
+                mask[index] = True
+        return mask
+
+    @property
+    def parameters_values_in_slots(self):
+        values = numpy.zeros(len(self.parameters_names_in_slots))
+        for pname, parameter in self.parameters:
+            if pname in self.parameters_names_in_slots:
+                index = self.parameters_names_in_slots.index(pname)
+                values[index] = parameter.value
+        return values
 
     def _load_inputs(self, profile_path: str, structure_path: str):
         """
@@ -158,57 +164,24 @@ class PDFAdapter(BaseAdapter):
             "structure": structure,
         }
         sg = getattr(stru_parser, "spacegroup", None)
-        self._inputs["spacegroup"] = sg.short_name if sg else "P1"
+        # self._inputs["spacegroup"] = sg.short_name if sg else "P1"
+        self._inputs["spacegroup"] = sg.short_name if sg else None
         profile = Profile()
         parser = PDFParser()
         parser.parseFile(str(profile_path))
         profile.loadParsedData(parser)
         self._inputs["profile"] = profile
 
-    def _init_parameters(self):
-        self._possible_parameter_names_group = {
-            "profile_parameters": ["xmin", "xmax", "dx"],
-            "generator_instrument_parameters": ["Qmin", "Qmax"],
-            "generator_parameters": [
-                "qdamp",
-                "qbroad",
-                "scale",
-                "delta1",
-                "delta2",
-            ],
-            "structure_lattice_parameters": [
-                "a",
-                "b",
-                "c",
-                "alpha",
-                "beta",
-                "gamma",
-            ],
-            # "structure_atom_xyz_parameters": (
-            #     [f"x_{i}" for i in range(len(self._inputs["structure"]))]
-            #     + [f"y_{i}" for i in range(len(self._inputs["structure"]))]
-            #     + [f"z_{i}" for i in range(len(self._inputs["structure"]))]
-            # ),
-            "structure_atom_U_parameters": (
-                [f"U11_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"U22_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"U33_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"U12_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"U13_{i}" for i in range(len(self._inputs["structure"]))]
-                + [f"U23_{i}" for i in range(len(self._inputs["structure"]))]
-            ),
-        }
-
-    def _init_residual_factory(self, xmin=None, xmax=None, dx=None):
+    def _make_recipe(
+        self,
+        xmin=None,
+        xmax=None,
+        dx=None,
+        Qmin=None,
+        Qmax=None,
+    ):
         """
-        Initialize the factory to generate residual function.
-
-        Attributes
-        ----------
-        residual_factory: callable
-            A callable that returns the current residual function.
-        residual_factory_components: dict
-            A dictionary containing components used to build the residual.
+        Make the FitRecipe for PDF fitting.
         """
         # set up PDF generator, contribution, and recipe
         pdfgenerator = PDFGenerator("pdfgen")
@@ -225,7 +198,6 @@ class PDFAdapter(BaseAdapter):
         contribution.setProfile(self._inputs["profile"])
         contribution.addProfileGenerator(pdfgenerator)
         recipe = FitRecipe()
-        recipe.fithooks[0].verbose = 0
         recipe.addContribution(contribution)
         RUN_PARALLEL = True
         if RUN_PARALLEL:
@@ -235,7 +207,8 @@ class PDFAdapter(BaseAdapter):
                 from multiprocessing import Pool
             except ImportError:
                 print(
-                    "\nYou don't appear to have the necessary packages for parallelization"
+                    "\nYou don't appear to have the necessary packages for "
+                    "parallelization"
                 )
             syst_cores = multiprocessing.cpu_count()
             cpu_percent = psutil.cpu_percent()
@@ -245,93 +218,60 @@ class PDFAdapter(BaseAdapter):
             ncpu = int(numpy.max([1, avail_cores]))
             pool = Pool(processes=ncpu)
             pdfgenerator.parallel(ncpu=ncpu, mapfunc=pool.map)
-        self._residual_factory_components = {
-            "pdfgenerator": pdfgenerator,
-            "contribution": contribution,
-            "recipe": recipe,
-        }
-        # find all parameters and map them to their names
+        # find all parameters and add them to recipe variables
+        parameter_names = {}
+        parameter_names["pdfgenerator"] = [
+            "qdamp",
+            "qbroad",
+            "scale",
+            "delta1",
+            "delta2",
+        ]
+        for pname in parameter_names["pdfgenerator"]:
+            par = getattr(pdfgenerator, pname)
+            recipe.addVar(par, name=pname, fixed=False)
         stru_parset = pdfgenerator.phase
-        self._pname_parameter_dict = {
-            "a": stru_parset.lattice.a,
-            "b": stru_parset.lattice.b,
-            "c": stru_parset.lattice.c,
-            "alpha": stru_parset.lattice.alpha,
-            "beta": stru_parset.lattice.beta,
-            "gamma": stru_parset.lattice.gamma,
-        }
-        for i in range(len(stru_parset.atoms)):
-            atom_parset = stru_parset.atoms[i]
-            self._pname_parameter_dict[f"x_{i}"] = atom_parset._parameters["x"]
-            self._pname_parameter_dict[f"y_{i}"] = atom_parset._parameters["y"]
-            self._pname_parameter_dict[f"z_{i}"] = atom_parset._parameters["z"]
-            self._pname_parameter_dict[f"U11_{i}"] = atom_parset._parameters[
-                "U11"
-            ]
-            self._pname_parameter_dict[f"U22_{i}"] = atom_parset._parameters[
-                "U22"
-            ]
-            self._pname_parameter_dict[f"U33_{i}"] = atom_parset._parameters[
-                "U33"
-            ]
-            self._pname_parameter_dict[f"U12_{i}"] = atom_parset._parameters[
-                "U12"
-            ]
-            self._pname_parameter_dict[f"U13_{i}"] = atom_parset._parameters[
-                "U13"
-            ]
-            self._pname_parameter_dict[f"U23_{i}"] = atom_parset._parameters[
-                "U23"
-            ]
-        self._pname_parameter_dict["qdamp"] = pdfgenerator.qdamp
-        self._pname_parameter_dict["qbroad"] = pdfgenerator.qbroad
-        self._pname_parameter_dict["scale"] = pdfgenerator.scale
-        self._pname_parameter_dict["delta1"] = pdfgenerator.delta1
-        self._pname_parameter_dict["delta2"] = pdfgenerator.delta2
-
-    def _impose_symmertry_constraints(self, spacegroup: str):
-        """
-        Impose symmetry constraints on the structure based on the given
-        crystal system and space group.
-        """
-        spacegroup = (
-            self._inputs["spacegroup"] if spacegroup is None else spacegroup
-        )
-        stru_parset = self._residual_factory_components["pdfgenerator"].phase
-        spacegroupparams = constrainAsSpaceGroup(stru_parset, spacegroup)
-        for pname in self._possible_parameter_names_group[
-            "structure_atom_xyz_parameters"
-        ]:
-            self._pname_parameter_dict.pop(pname)
-        for pname in self._possible_parameter_names_group[
-            "structure_lattice_parameters"
-        ]:
-            self._pname_parameter_dict.pop(pname)
-        for pname in self._possible_parameter_names_group[
-            "structure_atom_U_parameters"
-        ]:
-            self._pname_parameter_dict.pop(pname)
-        for par in spacegroupparams.latpars:
-            self._pname_parameter_dict[par.name] = par
-        for par in spacegroupparams.adppars:
-            self._pname_parameter_dict[par.name] = par
-
-    def _bind_model_parameters(self):
-        """
-        Bind parameters to the variables used to compute residuals.
-        """
-        for pname, parameter in self._pname_parameter_dict.items():
-            self._residual_factory_components["recipe"].addVar(
-                parameter, name=pname, fixed=False
-            )
-        for pname, _ in self._pname_parameter_dict.items():
-            self._pname_parameter_dict[pname] = (
-                self._residual_factory_components["recipe"]._parameters.get(
-                    pname
-                )
-            )
-        self._residual_factory_components["recipe"].fix("all")
-        self._parameters_ready = True
+        spacegroup = self._inputs.get("spacegroup", None)
+        if spacegroup is not None:
+            spacegroupparams = constrainAsSpaceGroup(stru_parset, spacegroup)
+            if spacegroupparams.xyzpars is not None:
+                for par in spacegroupparams.xyzpars:
+                    recipe.addVar(par, name=par.name, fixed=False)
+            if spacegroupparams.latpars is not None:
+                for par in spacegroupparams.latpars:
+                    recipe.addVar(par, name=par.name, fixed=False)
+            if spacegroupparams.adppars is not None:
+                for par in spacegroupparams.adppars:
+                    recipe.addVar(par, name=par.name, fixed=False)
+        else:
+            for i, atom in enumerate(stru_parset.atoms):
+                for coord in ["x", "y", "z"]:
+                    par = atom._parameters[coord]
+                    recipe.addVar(par, name=par.name + f"_{i}", fixed=False)
+                for adp in [
+                    "U11",
+                    "U22",
+                    "U33",
+                    "U12",
+                    "U13",
+                    "U23",
+                ]:
+                    par = atom._parameters[adp]
+                    recipe.addVar(par, name=par.name + f"_{i}", fixed=False)
+            lattice = stru_parset.getLattice()
+            for lattice_par_name in [
+                "a",
+                "b",
+                "c",
+                "alpha",
+                "beta",
+                "gamma",
+            ]:
+                par = lattice._parameters[lattice_par_name]
+                recipe.addVar(par, name=lattice_par_name, fixed=False)
+        recipe.fix("all")
+        recipe.fithooks[0].verbose = 0
+        self._recipe = recipe
 
     def fix_parameters(self, parameter_names):
         """
@@ -340,11 +280,11 @@ class PDFAdapter(BaseAdapter):
         """
         for pname in parameter_names:
             if pname == "all":
-                self._residual_factory_components["recipe"].fix("all")
+                self._recipe.fix("all")
                 continue
             if pname not in self.parameters:
                 raise KeyError(f"Parameter {pname} not found in the model.")
-            self._residual_factory_components["recipe"].fix(pname)
+            self._recipe.fix(pname)
 
     def free_parameters(self, parameter_names):
         """
@@ -353,25 +293,48 @@ class PDFAdapter(BaseAdapter):
         """
         for pname in parameter_names:
             if pname == "all":
-                self._residual_factory_components["recipe"].free("all")
+                self._recipe.free("all")
                 continue
             if pname not in self.parameters:
                 raise KeyError(f"Parameter {pname} not found in the model.")
-            self._residual_factory_components["recipe"].free(pname)
+            self._recipe.free(pname)
 
     def show_parameters(self):
         """
-        Show current parameter values and their fix/free status.
+        Show current parameter values and their fix/free status for the
+        current instance.
         """
         msg = "Current parameter values and their status:\n"
+        pnames, pvalues, statuses = [], [], []
         for pname, parameter in self.parameters.items():
             status = (
                 "free"
-                if self._residual_factory_components["recipe"].isFree(
-                    parameter
-                )
+                if self.parameters["recipe"].isFree(parameter)
                 else "fixed"
             )
             msg += f"{pname}: {parameter.value} ({status})\n"
+            pnames.append(pname)
+            pvalues.append(parameter.value)
+            statuses.append(status)
         print(msg)
-        return msg
+        return pnames, pvalues, statuses
+
+    def apply_pv_dict(self, pv_dict: dict):
+        """
+        Apply all parameter values from the provided dictionary.
+        Raise KeyError if any parameter is missing.
+
+        Parameters
+        ----------
+        pv_dict : dict
+            Dictionary mapping parameter names to their desired values.
+        """
+        variables = {
+            pname: param
+            for pname, param in self._recipe._parameters.items()
+            if self._recipe.isFree(param)
+        }
+        for pname, pvalue in pv_dict.items():
+            if pname not in variables:
+                raise KeyError(f"Parameter {pname} not found or is fixed.")
+            variables[pname].setValue(pvalue)
