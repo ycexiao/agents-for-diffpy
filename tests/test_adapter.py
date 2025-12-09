@@ -43,3 +43,4 @@ def test_adapter_workflow():
             x_scale="jac",
         )
         print(f"Fitting step: {step}, success: {result.success}")
+        print(FitResults(adapter._recipe).rw)

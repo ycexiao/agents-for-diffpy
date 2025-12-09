@@ -19,7 +19,7 @@ from BaseAdapter import BaseAdapter
 # setQmax and setQmin for PDFGenerator?
 
 
-class PDFAdapter:
+class PDFAdapter(BaseAdapter):
     """
     Adapter to expose PDF fitting interface for FitRunner.
 
@@ -36,22 +36,26 @@ class PDFAdapter:
 
     Properties
     ----------
+    residual_scalar: float
+        The scalar value of the current residual.
     residual: callable
         The current residual function.
-    initial_values: dict
-        The dictionary of initial parameter values for residual function.
+    initial_values: list
+        The list of initial parameter values for residual function.
     parameters: dict
         The dictionary of parameter objects (both fixed and free) used in
         the current instance.
     parameter_slots_mask: list
         The boolean mask list indicating which parameters in
         `parameters_names_in_slots` are present in the current model.
+        E.g., For a cubic structure, only 'a' is present among 'a', 'b', 'c'.
     parameter_names_in_slots: list
         The sorted list of all parameter names used in ML/RL model.
-        The parameter name might not appear in the specific structure model.
     parameter_values_in_slots: list
-        The sorted list of all parameter names used in ML/RL model.
-        The parameter name might not appear in the specific structure model.
+        The sorted list of all parameter values used in ML/RL model.
+    observation: object
+        The observations used aside from residual to reflect the current fit
+        quality.
 
     Attributes
     ----------
@@ -59,8 +63,6 @@ class PDFAdapter:
         A dictionary containing loaded 'structure' and 'profile' objects.
     _recipe : FitRecipe
         The FitRecipe object managing the fitting process.
-    _parameters_ready : bool
-        Flag indicating whether parameters have been initialized and bound.
 
     Methods
     -------
@@ -70,10 +72,16 @@ class PDFAdapter:
         Free parameters given their names.
     show_parameters()
         Show current parameter values and their fix/free status.
+    apply_pv_dict(pv_dict: dict)
+        Apply a dictionary of parameter values to the model.
+    get_pv_dict() -> dict
+        Get current parameter values as a dictionary.
+    apply_parameter_values_in_slot(values: list)
+        Apply parameter values from the `parameter_values_in_slots` to the
+        current model.
     """
 
     def __init__(self, **inputs):
-        self._parameters_ready = False
         self._load_inputs(
             profile_path=inputs.pop("profile_path"),
             structure_path=inputs.pop("structure_path"),
@@ -91,15 +99,43 @@ class PDFAdapter:
         return self._recipe.residual
 
     @property
+    def residual_scalar(self):
+        """
+        Copied from Fitresult._calculateMetrics
+        """
+        y = self._recipe.pdfcontribution.profile.y
+        ycalc = self._recipe.pdfcontribution._eq()
+        dy = self._recipe.pdfcontribution.profile.dy
+        num = numpy.abs(y - ycalc)
+        y = numpy.abs(y)
+        chiv = num / dy
+        cumchi2 = numpy.cumsum(chiv**2)
+        # avoid index error for empty array
+        yw = y / dy
+        yw2tot = numpy.dot(yw, yw)
+        if yw2tot == 0.0:
+            yw2tot = 1.0
+        cumrw = numpy.sqrt(cumchi2 / yw2tot)
+        # avoid index error for empty array
+        rw = cumrw[-1:].sum()
+        return rw
+
+    @property
     def initial_values(self):
         return self._recipe.values
+
+    @property
+    def observation(self):
+        y = self._recipe.pdfcontribution.profile.y
+        ycalc = self._recipe.pdfcontribution._eq()
+        return y, ycalc
 
     @property
     def parameters(self):
         return self._recipe._parameters
 
     @property
-    def parameters_names_in_slots(self):
+    def parameter_names_in_slots(self):
         names = [
             "qdamp",
             "qbroad",
@@ -132,20 +168,20 @@ class PDFAdapter:
         return names
 
     @property
-    def parameters_slots_mask(self):
-        mask = numpy.zeros(len(self.parameters_names_in_slots), dtype=bool)
+    def parameter_slots_mask(self):
+        mask = numpy.zeros(len(self.parameter_names_in_slots), dtype=bool)
         for pname in self.parameters:
-            if pname in self.parameters_names_in_slots:
-                index = self.parameters_names_in_slots.index(pname)
+            if pname in self.parameter_names_in_slots:
+                index = self.parameter_names_in_slots.index(pname)
                 mask[index] = True
         return mask
 
     @property
-    def parameters_values_in_slots(self):
-        values = numpy.zeros(len(self.parameters_names_in_slots))
-        for pname, parameter in self.parameters:
-            if pname in self.parameters_names_in_slots:
-                index = self.parameters_names_in_slots.index(pname)
+    def parameter_values_in_slots(self):
+        values = numpy.zeros(len(self.parameter_names_in_slots))
+        for pname, parameter in self.parameters.items():
+            if pname in self.parameter_names_in_slots:
+                index = self.parameter_names_in_slots.index(pname)
                 values[index] = parameter.value
         return values
 
@@ -184,9 +220,9 @@ class PDFAdapter:
         Make the FitRecipe for PDF fitting.
         """
         # set up PDF generator, contribution, and recipe
-        pdfgenerator = PDFGenerator("pdfgen")
+        pdfgenerator = PDFGenerator("pdfgenerator")
         pdfgenerator.setStructure(self._inputs["structure"])
-        contribution = FitContribution("pdfcontri")
+        contribution = FitContribution("pdfcontribution")
         xmin = xmin if xmin else numpy.min(self._inputs["profile"]._xobs)
         xmax = xmax if xmax else numpy.max(self._inputs["profile"]._xobs)
         dx = (
@@ -338,3 +374,31 @@ class PDFAdapter:
             if pname not in variables:
                 raise KeyError(f"Parameter {pname} not found or is fixed.")
             variables[pname].setValue(pvalue)
+
+    def get_pv_dict(self):
+        """
+        Get current parameter values as a dictionary.
+
+        Returns
+        -------
+        pv_dict : dict
+            Dictionary mapping parameter names to their current values.
+        """
+        pv_dict = {
+            pname: param.value
+            for pname, param in self._recipe._parameters.items()
+        }
+        return pv_dict
+
+    def apply_parameter_values_in_slot(self, values: list):
+        """
+        Apply parameter values from the `parameter_values_in_slots`
+        to the current model. Only parameters present in the current
+        model will be updated.
+        """
+        parameter_names = self.parameter_names_in_slots
+        for i, name in enumerate(parameter_names):
+            if name in self.parameters and self._recipe.isFree(
+                self.parameters[name]
+            ):
+                self.parameters[name].setValue(values[i])

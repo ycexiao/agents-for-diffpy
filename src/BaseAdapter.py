@@ -4,10 +4,17 @@ from abc import ABC, abstractmethod
 class BaseAdapter(ABC):
 
     @property
-    @abstractmethod
     def residual(self):
         """
         Return the residual function to be minimized.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def residual_scalar(self):
+        """
+        Return the scalar residual value.
         """
         pass
 
@@ -36,6 +43,24 @@ class BaseAdapter(ABC):
         """
         pass
 
+    @property
+    @abstractmethod
+    def parameter_names_in_slots(self):
+        """
+        Return a sorted list of all parameter names used in ML/RL model.
+        The parameter name might not appear in the specific structure model.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def parameter_slots_mask(self):
+        """
+        Return a boolean list indicating which parameters are free (True) or fixed (False).
+        The order corresponds to `parameter_names_in_slots`.
+        """
+        pass
+
     @abstractmethod
     def free_parameters(self, parameter_names):
         """
@@ -61,66 +86,14 @@ class BaseAdapter(ABC):
         pass
 
     @abstractmethod
-    def show_parameters(self):
+    def apply_parameter_values_in_slot(self, values):
         """
-        Show current parameter values and their fix/free status.
-        """
-        pass
-
-    @abstractmethod
-    def apply_parameters_values(self, pv_dict: dict):
-        """
-        Apply all parameter values from the provided dictionary.
-        Raise KeyError if any parameter is missing.
+        Apply parameter values from the `parameter_values_in_slots` to the
+        current model.
 
         Parameters
         ----------
-        pv_dict : dict
-            Dictionary mapping parameter names to their desired values.
+        values : list
+            List of parameter values corresponding to `parameter_names_in_slots`.
         """
         pass
-
-    @abstractmethod
-    def update_parameters_values(self, pv_dict: dict):
-        """
-        Only update given parameter values based on the provided dictionary to
-        speed up the computing process.
-
-        Parameters
-        ----------
-        pv_dict : dict
-            Dictionary mapping parameter names to their desired values.
-        """
-        pass
-
-    def get_parameters_values_dict(self):
-        """
-        Get a dictionary of current parameter values.
-
-        Returns
-        -------
-        dict
-            Dictionary mapping parameter names to their current values.
-        """
-        return {pname: param.value for pname, param in self.parameters.items()}
-
-    def apply_parameters_values(self, pv_dict: dict):
-        """
-        Apply all parameter values from the provided dictionary.
-        Raise KeyError if any parameter is missing.
-        """
-        for pname, parameter in self.parameters.items():
-            if pname not in pv_dict:
-                continue
-            parameter.setValue(pv_dict[pname])
-
-    def update_parameters_values(self, pv_dict: dict):
-        """
-        Only update given parameter values based on the provided dictionary to
-        speed up the computing process.
-        """
-        for pname, pvalue in pv_dict.items():
-            if pname not in self.parameters:
-                raise KeyError(f"Parameter {pname} not found in the model.")
-            parameter = self.parameters[pname]
-            parameter.setValue(pvalue)

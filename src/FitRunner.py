@@ -1,90 +1,159 @@
 from BaseAdapter import BaseAdapter
 from PDFAdapter import PDFAdapter
-from FitDiag import FitDiag
+from FitDAG import FitDAG
 from scipy.optimize import least_squares
 from collections import OrderedDict
 import uuid
 import copy
 from typing import Literal
 from networkx import DiGraph
-from FitDiag import FitDiag
+from FitDAG import FitDAG
 import numpy
+import warnings
+
+# copy.deepcopy(adapter)
+# ERROR   RuntimeError: Pickling of
+# "diffpy.srreal.parallel.ParallelPairQuantity" instances is not enabled
+# (http://www.boost.org/libs/python/doc/v2/pickle.html)
 
 
 class FitRunner:
-    def __init__(self, parameter_names=[]):
-        self.refine_operation = {}
+    def __init__(self):
+        self.workers = {}
 
-    def proceed_from_graph(
+    def run_workflow(
         self,
-        workflow: DiGraph,
+        dag: FitDAG,
         adapter: PDFAdapter,
+        start_nodes_ids=None,
+        strict=False,
     ):
-        frontier_nodes = {
-            str(uuid.uuid4()): n
-            for n in workflow.nodes
-            if workflow.in_degree(n) == 0
-        }
-        workers = {key: FitWorker(adapter) for key in frontier_nodes.keys()}
-        while frontier_nodes:
-            upcoming_frontier_nodes = {}
-            for key in frontier_nodes:
-                workers[key].refine(
-                    [workflow.nodes[frontier_nodes[key]]["value"]],
+        if start_nodes_ids is None:
+            frontier_node_ids = []
+            for node_id in dag.graph.nodes:
+                if dag.graph.in_degree(node_id) == 0:
+                    frontier_node_ids.append(node_id)
+                    dag.graph.nodes[node_id]["parameter_values"] = (
+                        copy.deepcopy(adapter.parameter_values_in_slots)
+                    )
+                    dag.tag_node(
+                        node_id,
+                        "initialized",
+                    )
+        else:
+            frontier_node_ids = start_nodes_ids
+            for node_id in frontier_node_ids:
+                paraent_node_id = list(dag.graph.predecessors(node_id))[0]
+                dag.graph.nodes[node_id]["parameter_values"] = copy.deepcopy(
+                    dag.graph.nodes[paraent_node_id]["parameter_values"]
                 )
+                dag.tag_node(
+                    node_id,
+                    "initialized",
+                )
+        while frontier_node_ids:
+            upcoming_frontier_node_ids = []
+            for node_id in frontier_node_ids:
+                if dag.tag_is(node_id, "initialized"):
+                    (
+                        action,
+                        status,
+                        reward,
+                        observation,
+                        parameter_values,
+                    ) = self.run_node(
+                        adapter,
+                        dag.graph.nodes[node_id]["parameter_values"],
+                        dag.graph.nodes[node_id]["value"],
+                        strict=strict,
+                    )
+                    dag.graph.nodes[node_id].update(
+                        {
+                            "action": action,
+                            "status": status,
+                            "reward": reward,
+                            "observation": observation,
+                            "parameter_values": parameter_values,
+                        }
+                    )
+                    dag.tag_node(node_id, "completed")
+                else:
+                    # FIXME
+                    pass
                 # If no successor, ignore it
-                if workflow.out_degree(frontier_nodes[key]) == 0:
+                if dag.graph.out_degree(node_id) == 0:
                     continue
                 # If one successor, move forward
-                elif workflow.out_degree(frontier_nodes[key]) == 1:
-                    succ = list(workflow.successors(frontier_nodes[key]))[0]
-                    upcoming_frontier_nodes[key] = succ
-                # If multiple successors, branch out
-                elif workflow.out_degree(frontier_nodes[key]) > 1:
-                    succs = list(workflow.successors(frontier_nodes[key]))
-                    upcoming_frontier_nodes[key] = succs[0]
-                    for succ in succs[1:]:
-                        new_key = str(uuid.uuid4())
-                        upcoming_frontier_nodes[new_key] = succ
-                        workers[new_key] = FitWorker(copy.deepcopy(adapter))
-                        workers[new_key].adapter.apply_parameters_values(
-                            workers[key].adapter.get_parameters_values_dict()
+                elif dag.graph.out_degree(node_id) == 1:
+                    succ_id = list(dag.graph.successors(node_id))[0]
+                    dag.graph.nodes[succ_id]["parameter_values"] = (
+                        copy.deepcopy(
+                            dag.graph.nodes[node_id]["parameter_values"]
                         )
-            frontier_nodes = upcoming_frontier_nodes
-        self.workers = workers
+                    )
+                    dag.tag_node(succ_id, "initialized")
+                    upcoming_frontier_node_ids.append(succ_id)
+                # If multiple successors, branch out
+                elif dag.graph.out_degree(frontier_node_ids[node_id]) > 1:
+                    succ_ids = list(
+                        dag.graph.successors(frontier_node_ids[node_id])
+                    )
+                    upcoming_frontier_node_ids.append(succ_ids[0])
+                    for succ_id in succ_ids[1:]:
+                        dag.graph.nodes[succ_id]["parameter_values"] = (
+                            copy.deepcopy(
+                                dag.graph.nodes[frontier_node_ids[node_id]][
+                                    "parameter_values"
+                                ]
+                            )
+                        )
+                        dag.tag_node(succ_id, "initialized")
+                        upcoming_frontier_node_ids.append(succ_id)
+            frontier_node_ids = upcoming_frontier_node_ids
+        return dag
 
-
-class FitWorker:
-    def __init__(self, adapter: PDFAdapter):
-        self.adapter = adapter
-        self.terminated = False
-        self.allowed_actions = list(adapter.parameters.keys())
-        self.refine_steps = []
-
-    def refine(self, refine_param_names):
-        if not set(refine_param_names).issubset(set(self.allowed_actions)):
-            raise ValueError("Refine worker get unknown parameter names.")
-        self.adapter.free_parameters(refine_param_names)
-        param_value_before_fit = self.adapter.parameter_values_in_slots
-        out = least_squares(
-            self.adapter.residual, self.adapter.initial_values, x_scale="jac"
+    def run_node(
+        self, adapter, parameter_values, refine_param_names, strict=False
+    ):
+        if "all" in refine_param_names:
+            refine_param_names = ["all"]
+        else:
+            if not set(refine_param_names).issubset(
+                set(adapter.parameters.keys())
+            ):
+                if strict:
+                    raise ValueError(
+                        "Refine worker get unknown parameter names."
+                    )
+                else:
+                    invalid_operations = list(
+                        set(refine_param_names)
+                        - set(adapter.parameters.keys())
+                    )
+                    warnings.warn(
+                        "Refine worker get Invalide parameter names. "
+                        f"Ignoring {invalid_operations}."
+                    )
+                    refine_param_names = list(
+                        set(refine_param_names).intersection(
+                            set(adapter.parameters.keys())
+                        )
+                    )
+        adapter.free_parameters(refine_param_names)
+        res = least_squares(
+            adapter.residual, adapter.initial_values, x_scale="jac"
         )
-        param_value_after_fit = self.adapter.parameter_values_in_slots
-        param_variation = [
-            (
-                (param_value_after_fit[i] - param_value_before_fit[i])
-                / param_value_before_fit[i]
-                if param_value_before_fit[i] != 0
-                else 0
-            )
-            for i in range(len(refine_param_names))
+        refine_param_indexes = [
+            1 if name in refine_param_names else 0
+            for name in adapter.parameter_names_in_slots
         ]
-        array_summary = (
-            *param_variation,
-            out.success,
-            out.cost,
-            out.fun,
-            out.optimality,
-            out.jac,
-        )
-        self.refine_steps.append((refine_param_names, array_summary))
+        action = refine_param_indexes
+        status = [
+            adapter.parameter_slots_mask,
+            adapter.parameter_values_in_slots,
+        ]
+        reward = adapter.residual_scalar
+        observation = adapter.observation
+        parameter_values = adapter.parameter_values_in_slots
+        adapter.fix_parameters(refine_param_names)
+        return action, status, reward, observation, parameter_values
