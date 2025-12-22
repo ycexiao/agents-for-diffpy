@@ -11,7 +11,6 @@ class PDFexperiment:
     def load_inputs(
         self, structure_path, qmin=0.5, qmax=25.0, rmin=0.0, rmax=20.0
     ):
-        # Placeholder for loading structure
         stru_parser = getParser("cif")
         structure = stru_parser.parse(Path(structure_path).read_text())
         sg = getattr(stru_parser, "spacegroup", None)

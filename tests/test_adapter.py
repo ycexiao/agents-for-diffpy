@@ -9,11 +9,15 @@ from diffpy.structure.parsers import getParser
 def test_adapter_workflow():
     profile_path = Path().cwd() / "data" / "Ni.gr"
     structure_path = Path().cwd() / "data" / "Ni.cif"
-    adapter = PDFAdapter(
+    adapter = PDFAdapter()
+    adapter.load_inputs(
         profile_path=str(profile_path),
         structure_path=str(structure_path),
-        Qmax=25.0,
-        Qmin=0.5,
+        xmin=0.5,
+        xmax=15.0,
+        dx=0.01,
+        qmin=0.5,
+        qmax=25.0,
     )
     # Set initial parameter values
     adapter.free_parameters(["all"])

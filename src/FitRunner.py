@@ -19,141 +19,70 @@ import warnings
 
 class FitRunner:
     def __init__(self):
-        self.workers = {}
+        pass
 
     def run_workflow(
         self,
         dag: FitDAG,
-        adapter: PDFAdapter,
-        start_nodes_ids=None,
-        strict=False,
+        Adapter: type,
+        inputs: list,
+        payloads: list,
+        names=None,
     ):
-        if start_nodes_ids is None:
-            frontier_node_ids = []
-            for node_id in dag.graph.nodes:
-                if dag.graph.in_degree(node_id) == 0:
-                    frontier_node_ids.append(node_id)
-                    dag.graph.nodes[node_id]["parameter_values"] = (
-                        copy.deepcopy(adapter.parameter_values_in_slots)
-                    )
-                    dag.tag_node(
-                        node_id,
-                        "initialized",
-                    )
-        else:
-            frontier_node_ids = start_nodes_ids
-            for node_id in frontier_node_ids:
-                paraent_node_id = list(dag.graph.predecessors(node_id))[0]
-                dag.graph.nodes[node_id]["parameter_values"] = copy.deepcopy(
-                    dag.graph.nodes[paraent_node_id]["parameter_values"]
-                )
-                dag.tag_node(
-                    node_id,
-                    "initialized",
-                )
-        while frontier_node_ids:
-            upcoming_frontier_node_ids = []
-            for node_id in frontier_node_ids:
-                if dag.tag_is(node_id, "initialized"):
-                    (
-                        action,
-                        status,
-                        reward,
-                        observation,
-                        parameter_values,
-                    ) = self.run_node(
-                        adapter,
-                        dag.graph.nodes[node_id]["parameter_values"],
-                        dag.graph.nodes[node_id]["value"],
-                        strict=strict,
-                    )
-                    dag.graph.nodes[node_id].update(
-                        {
-                            "action": action,
-                            "status": status,
-                            "reward": reward,
-                            "observation": observation,
-                            "parameter_values": parameter_values,
-                        }
-                    )
-                    dag.tag_node(node_id, "completed")
-                else:
-                    # FIXME
-                    pass
-                # If no successor, ignore it
-                if dag.graph.out_degree(node_id) == 0:
-                    continue
-                # If one successor, move forward
-                elif dag.graph.out_degree(node_id) == 1:
-                    succ_id = list(dag.graph.successors(node_id))[0]
-                    dag.graph.nodes[succ_id]["parameter_values"] = (
-                        copy.deepcopy(
-                            dag.graph.nodes[node_id]["parameter_values"]
-                        )
-                    )
-                    dag.tag_node(succ_id, "initialized")
-                    upcoming_frontier_node_ids.append(succ_id)
-                # If multiple successors, branch out
-                elif dag.graph.out_degree(frontier_node_ids[node_id]) > 1:
-                    succ_ids = list(
-                        dag.graph.successors(frontier_node_ids[node_id])
-                    )
-                    upcoming_frontier_node_ids.append(succ_ids[0])
-                    for succ_id in succ_ids[1:]:
-                        dag.graph.nodes[succ_id]["parameter_values"] = (
-                            copy.deepcopy(
-                                dag.graph.nodes[frontier_node_ids[node_id]][
-                                    "parameter_values"
-                                ]
-                            )
-                        )
-                        dag.tag_node(succ_id, "initialized")
-                        upcoming_frontier_node_ids.append(succ_id)
-            frontier_node_ids = upcoming_frontier_node_ids
-        return dag
+        adapters_dict = {}
+        dag.load_inputs(inputs, names)
+        for i, node_id in enumerate(dag.root_nodes):
+            adapter = Adapter()
+            adapter.load_inputs(dag.nodes[node_id]["inputs"])
+            # FIXME: name could be duplicated as it was not chekced!
+            # fix it latter
+            if names:
+                index = names.index(dag.nodes[node_id]["name"])
+                adapter.apply_payload(payloads[index])
+            else:
+                adapter.apply_payload(payloads[i])
+            adapters_dict[node_id] = adapter
 
-    def run_node(
-        self, adapter, parameter_values, refine_param_names, strict=False
-    ):
-        if "all" in refine_param_names:
-            refine_param_names = ["all"]
-        else:
-            if not set(refine_param_names).issubset(
-                set(adapter.parameters.keys())
-            ):
-                if strict:
-                    raise ValueError(
-                        "Refine worker get unknown parameter names."
-                    )
+        frontier_node_ids = dag.root_nodes
+
+        while frontier_node_ids:
+            upcoming_frontier_node_ids = {}
+            for node_id in frontier_node_ids:
+                node = dag.nodes[node_id]
+                adapter = adapters_dict[node_id]
+                adapter.action_func_factory(node["action"])()
+                node["payload"] = adapter.get_payload()
+                succ_ids = list(dag.successors(node_id))
+                upcoming_frontier_node_ids.update(
+                    {succ_id: node_id for succ_id in succ_ids}
+                )
+            for succ_id, parent_id in upcoming_frontier_node_ids.items():
+                succ_node = dag.nodes[succ_id]
+                input_source_node_id = dag.get_input_source(succ_id)
+                if (
+                    input_source_node_id == dag.get_input_source(parent_id)
+                    and parent_id in adapters_dict
+                ):
+                    adapters_dict[succ_id] = adapters_dict.pop(parent_id)
                 else:
-                    invalid_operations = list(
-                        set(refine_param_names)
-                        - set(adapter.parameters.keys())
+                    adapter = Adapter()
+                    adapter.load_inputs(
+                        dag.nodes[input_source_node_id]["inputs"]
                     )
-                    warnings.warn(
-                        "Refine worker get Invalide parameter names. "
-                        f"Ignoring {invalid_operations}."
-                    )
-                    refine_param_names = list(
-                        set(refine_param_names).intersection(
-                            set(adapter.parameters.keys())
-                        )
-                    )
-        adapter.free_parameters(refine_param_names)
-        res = least_squares(
-            adapter.residual, adapter.initial_values, x_scale="jac"
-        )
-        refine_param_indexes = [
-            1 if name in refine_param_names else 0
-            for name in adapter.parameter_names_in_slots
-        ]
-        action = refine_param_indexes
-        status = [
-            adapter.parameter_slots_mask,
-            adapter.parameter_values_in_slots,
-        ]
-        reward = adapter.residual_scalar
-        observation = adapter.observation
-        parameter_values = adapter.parameter_values_in_slots
-        adapter.fix_parameters(refine_param_names)
-        return action, status, reward, observation, parameter_values
+                    adapters_dict[succ_id] = adapter
+                payload_source_node_id = dag.get_payload_source(succ_id)
+                # The current policy use the direct parent node at the lowest
+                # level as the payload source, so it must have been processed
+                # before.
+                # The assertion is a sanity check.
+                assert dag.nodes[payload_source_node_id]["payload"] is not None
+                payload = dag[payload_source_node_id][succ_id][
+                    "propagate_func"
+                ](
+                    dag.nodes[payload_source_node_id],
+                    succ_node,
+                )
+                adapters_dict[succ_id].apply_payload(payload)
+            frontier_node_ids = list(set(upcoming_frontier_node_ids.keys()))
+
+        return dag, adapters_dict

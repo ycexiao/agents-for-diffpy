@@ -1,5 +1,5 @@
 from pathlib import Path
-from experiment import PDFExperiment
+from PDFexperiment import PDFExperiment
 from diffpy.structure import loadStructure
 from matplotlib import pyplot as plt
 

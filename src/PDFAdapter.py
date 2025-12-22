@@ -6,12 +6,13 @@ from diffpy.srfit.fitbase import (
     FitContribution,
     FitRecipe,
     Profile,
-    FitResults,
 )
 from diffpy.srfit.pdf import PDFGenerator
 from pathlib import Path
 import numpy
 from BaseAdapter import BaseAdapter
+from scipy.optimize import least_squares
+import difflib
 
 # xyz_par is constrained or not when symmetry condition is imposed?
 # What happended whe "P1" is given? What is the difference of setting "P1"
@@ -23,120 +24,30 @@ class PDFAdapter(BaseAdapter):
     """
     Adapter to expose PDF fitting interface for FitRunner.
 
-    Parameters
-    ----------
-    profile_path : str
-        File path to the PDF profile data.
-    structure_path : str
-        File path to the structure data.
-    kwargs : dict
-        Additional keyword arguments for configuration.
-        e.g., xmin, xmax, dx for profile calculation range.
-              qmin, qmax for PDF generator settings.
-
-    Properties
-    ----------
-    residual_scalar: float
-        The scalar value of the current residual.
-    residual: callable
-        The current residual function.
-    initial_values: list
-        The list of initial parameter values for residual function.
-    parameters: dict
-        The dictionary of parameter objects (both fixed and free) used in
-        the current instance.
-    parameter_slots_mask: list
-        The boolean mask list indicating which parameters in
-        `parameters_names_in_slots` are present in the current model.
-        E.g., For a cubic structure, only 'a' is present among 'a', 'b', 'c'.
-    parameter_names_in_slots: list
-        The sorted list of all parameter names used in ML/RL model.
-    parameter_values_in_slots: list
-        The sorted list of all parameter values used in ML/RL model.
-    observation: object
-        The observations used aside from residual to reflect the current fit
-        quality.
-
     Attributes
     ----------
-    _inputs : dict
-        A dictionary containing loaded 'structure' and 'profile' objects.
     _recipe : FitRecipe
         The FitRecipe object managing the fitting process.
 
     Methods
     -------
-    fix_parameters(parameter_names: list)
-        Fix parameters given their names.
-    free_parameters(parameter_names: list)
-        Free parameters given their names.
+    load_inputs(inputs)
+        Load inputs to initialize the adapter.
+    apply_parameter_values(pv_dict)
+        Update parameter values from the provided dictionary.
+    get_parameter_values()
+        Get current parameter values as a dictionary.
     show_parameters()
         Show current parameter values and their fix/free status.
-    apply_pv_dict(pv_dict: dict)
-        Apply a dictionary of parameter values to the model.
-    get_pv_dict() -> dict
-        Get current parameter values as a dictionary.
-    apply_parameter_values_in_slot(values: list)
-        Apply parameter values from the `parameter_values_in_slots` to the
-        current model.
+    apply_action()
+        Generate operations to be performed in the workflow.
+    generate_observation()
     """
 
-    def __init__(self, **inputs):
-        self._load_inputs(
-            profile_path=inputs.pop("profile_path"),
-            structure_path=inputs.pop("structure_path"),
-        )
-        self._make_recipe(
-            xmin=inputs.get("xmin", None),
-            xmax=inputs.get("xmax", None),
-            dx=inputs.get("dx", None),
-            Qmin=inputs.get("qmin", None),
-            Qmax=inputs.get("qmax", None),
-        )
-
-    @property
-    def residual(self):
-        return self._recipe.residual
-
-    @property
-    def residual_scalar(self):
-        """
-        Copied from Fitresult._calculateMetrics
-        """
-        y = self._recipe.pdfcontribution.profile.y
-        ycalc = self._recipe.pdfcontribution._eq()
-        dy = self._recipe.pdfcontribution.profile.dy
-        num = numpy.abs(y - ycalc)
-        y = numpy.abs(y)
-        chiv = num / dy
-        cumchi2 = numpy.cumsum(chiv**2)
-        # avoid index error for empty array
-        yw = y / dy
-        yw2tot = numpy.dot(yw, yw)
-        if yw2tot == 0.0:
-            yw2tot = 1.0
-        cumrw = numpy.sqrt(cumchi2 / yw2tot)
-        # avoid index error for empty array
-        rw = cumrw[-1:].sum()
-        return rw
-
-    @property
-    def initial_values(self):
-        return self._recipe.values
-
-    @property
-    def observation(self):
-        y = self._recipe.pdfcontribution.profile.y
-        ycalc = self._recipe.pdfcontribution._eq()
-        return y, ycalc
-
-    @property
-    def parameters(self):
-        return self._recipe._parameters
-
-    @property
-    def parameter_names_in_slots(self):
-        names = [
+    def __init__(self):
+        self.ready = False
+        # hard-coded parameter names to standardize the action interface
+        self._parameter_names = [
             "qdamp",
             "qbroad",
             "scale",
@@ -151,7 +62,7 @@ class PDFAdapter(BaseAdapter):
         ]
         max_atoms = 64
         for i in range(max_atoms):
-            names.extend(
+            self._parameter_names.extend(
                 [
                     f"x_{i}",
                     f"y_{i}",
@@ -165,73 +76,80 @@ class PDFAdapter(BaseAdapter):
                     f"U23_{i}",
                 ]
             )
-        return names
 
-    @property
-    def parameter_slots_mask(self):
-        mask = numpy.zeros(len(self.parameter_names_in_slots), dtype=bool)
-        for pname in self.parameters:
-            if pname in self.parameter_names_in_slots:
-                index = self.parameter_names_in_slots.index(pname)
-                mask[index] = True
-        return mask
+    def if_ready(func):
+        def wrapper(self, *args, **kwargs):
+            if not self.ready:
+                raise RuntimeError(
+                    "PDFAdapter is not ready. Please load inputs first."
+                )
+            return func(self, *args, **kwargs)
 
-    @property
-    def parameter_values_in_slots(self):
-        values = numpy.zeros(len(self.parameter_names_in_slots))
-        for pname, parameter in self.parameters.items():
-            if pname in self.parameter_names_in_slots:
-                index = self.parameter_names_in_slots.index(pname)
-                values[index] = parameter.value
-        return values
+        return wrapper
 
-    def _load_inputs(self, profile_path: str, structure_path: str):
+    def check_parameter_name(self, parameter_name):
+        wrong_msg = ""
+        if parameter_name not in self._parameter_names:
+            wrong_msg = (
+                f"Parameter {parameter_name} is not recognized. Did you mean: "
+                f"{difflib.get_close_matches(parameter_name, self._parameter_names, cutoff=0.6)}\n"  # noqa: E501
+            )
+        return wrong_msg
+
+    def load_inputs(self, inputs):
+        recipe_input_keys = [
+            "structure_path",
+            "profile_path",
+            "xmin",
+            "xmax",
+            "dx",
+            "qmin",
+            "qmax",
+        ]
+        recipe_inputs = {
+            k: inputs[k] for k in recipe_input_keys if k in inputs
+        }
+        self._make_recipe(**recipe_inputs)
+
+    def _make_recipe(
+        self,
+        structure_path,
+        profile_path,
+        xmin=None,
+        xmax=None,
+        dx=None,
+        qmin=None,
+        qmax=None,
+    ):
         """
-        Load profile and structure from given file paths.
+        Load inputs to create parameters and residuals.
 
         Attributes
         ----------
         inputs: dict
-            A dictionary containing loaded 'structure' and 'profile' objects.
+            The dictionary that should at least contain
+            'structure_path' and 'profile_path'.
         """
+        # load structure and profile
         stru_parser = getParser("cif")
         structure = stru_parser.parse(Path(structure_path).read_text())
-        self._inputs = {
-            "structure": structure,
-        }
         sg = getattr(stru_parser, "spacegroup", None)
-        # self._inputs["spacegroup"] = sg.short_name if sg else "P1"
-        self._inputs["spacegroup"] = sg.short_name if sg else None
+        spacegroup = sg.short_name if sg else "P1"
         profile = Profile()
         parser = PDFParser()
         parser.parseFile(str(profile_path))
         profile.loadParsedData(parser)
-        self._inputs["profile"] = profile
-
-    def _make_recipe(
-        self,
-        xmin=None,
-        xmax=None,
-        dx=None,
-        Qmin=None,
-        Qmax=None,
-    ):
-        """
-        Make the FitRecipe for PDF fitting.
-        """
         # set up PDF generator, contribution, and recipe
-        pdfgenerator = PDFGenerator("pdfgenerator")
-        pdfgenerator.setStructure(self._inputs["structure"])
+        xmin = xmin if xmin is not None else numpy.min(profile._xobs)
+        xmax = xmax if xmax is not None else numpy.max(profile._xobs)
+        dx = dx if dx is not None else numpy.mean(numpy.diff(profile._xobs))
+        qmin = qmin if qmin is not None else 0.5
+        qmax = qmax if qmax is not None else 25
+        pdfgenerator = PDFGenerator()
+        pdfgenerator.setStructure(structure)
         contribution = FitContribution("pdfcontribution")
-        xmin = xmin if xmin else numpy.min(self._inputs["profile"]._xobs)
-        xmax = xmax if xmax else numpy.max(self._inputs["profile"]._xobs)
-        dx = (
-            dx if dx else numpy.mean(numpy.diff(self._inputs["profile"]._xobs))
-        )
-        self._inputs["profile"].setCalculationRange(
-            xmin=xmin, xmax=xmax, dx=dx
-        )
-        contribution.setProfile(self._inputs["profile"])
+        profile.setCalculationRange(xmin=xmin, xmax=xmax, dx=dx)
+        contribution.setProfile(profile)
         contribution.addProfileGenerator(pdfgenerator)
         recipe = FitRecipe()
         recipe.addContribution(contribution)
@@ -255,127 +173,52 @@ class PDFAdapter(BaseAdapter):
             pool = Pool(processes=ncpu)
             pdfgenerator.parallel(ncpu=ncpu, mapfunc=pool.map)
         # find all parameters and add them to recipe variables
-        parameter_names = {}
-        parameter_names["pdfgenerator"] = [
+        for pname in [
             "qdamp",
             "qbroad",
             "scale",
             "delta1",
             "delta2",
-        ]
-        for pname in parameter_names["pdfgenerator"]:
+        ]:
             par = getattr(pdfgenerator, pname)
             recipe.addVar(par, name=pname, fixed=False)
         stru_parset = pdfgenerator.phase
-        spacegroup = self._inputs.get("spacegroup", None)
-        if spacegroup is not None:
-            spacegroupparams = constrainAsSpaceGroup(stru_parset, spacegroup)
-            if spacegroupparams.xyzpars is not None:
-                for par in spacegroupparams.xyzpars:
-                    recipe.addVar(par, name=par.name, fixed=False)
-            if spacegroupparams.latpars is not None:
-                for par in spacegroupparams.latpars:
-                    recipe.addVar(par, name=par.name, fixed=False)
-            if spacegroupparams.adppars is not None:
-                for par in spacegroupparams.adppars:
-                    recipe.addVar(par, name=par.name, fixed=False)
-        else:
-            for i, atom in enumerate(stru_parset.atoms):
-                for coord in ["x", "y", "z"]:
-                    par = atom._parameters[coord]
-                    recipe.addVar(par, name=par.name + f"_{i}", fixed=False)
-                for adp in [
-                    "U11",
-                    "U22",
-                    "U33",
-                    "U12",
-                    "U13",
-                    "U23",
-                ]:
-                    par = atom._parameters[adp]
-                    recipe.addVar(par, name=par.name + f"_{i}", fixed=False)
-            lattice = stru_parset.getLattice()
-            for lattice_par_name in [
-                "a",
-                "b",
-                "c",
-                "alpha",
-                "beta",
-                "gamma",
-            ]:
-                par = lattice._parameters[lattice_par_name]
-                recipe.addVar(par, name=lattice_par_name, fixed=False)
+        spacegroupparams = constrainAsSpaceGroup(stru_parset, spacegroup)
+        # FIXME: only support max 64 atoms. Refine the error messge later.
+        for par in spacegroupparams.xyzpars:
+            recipe.addVar(par, name=par.name, fixed=False)
+            assert par.name in self._parameter_names
+        for par in spacegroupparams.latpars:
+            assert par.name in self._parameter_names
+            recipe.addVar(par, name=par.name, fixed=False)
+        for par in spacegroupparams.adppars:
+            recipe.addVar(par, name=par.name, fixed=False)
+            assert par.name in self._parameter_names
         recipe.fix("all")
         recipe.fithooks[0].verbose = 0
         self._recipe = recipe
+        self.ready = True
 
-    def fix_parameters(self, parameter_names):
+    @if_ready
+    def _apply_parameter_values(self, pv_dict):
         """
-        Fix parameters given their names. If it has been fixed, do nothing.
-        If the parameter name is not found, raise KeyError.
-        """
-        for pname in parameter_names:
-            if pname == "all":
-                self._recipe.fix("all")
-                continue
-            if pname not in self.parameters:
-                raise KeyError(f"Parameter {pname} not found in the model.")
-            self._recipe.fix(pname)
-
-    def free_parameters(self, parameter_names):
-        """
-        Free parameters given their names. If it has been freed, do nothing.
-        If the parameter name is not found, raise KeyError.
-        """
-        for pname in parameter_names:
-            if pname == "all":
-                self._recipe.free("all")
-                continue
-            if pname not in self.parameters:
-                raise KeyError(f"Parameter {pname} not found in the model.")
-            self._recipe.free(pname)
-
-    def show_parameters(self):
-        """
-        Show current parameter values and their fix/free status for the
-        current instance.
-        """
-        msg = "Current parameter values and their status:\n"
-        pnames, pvalues, statuses = [], [], []
-        for pname, parameter in self.parameters.items():
-            status = (
-                "free"
-                if self.parameters["recipe"].isFree(parameter)
-                else "fixed"
-            )
-            msg += f"{pname}: {parameter.value} ({status})\n"
-            pnames.append(pname)
-            pvalues.append(parameter.value)
-            statuses.append(status)
-        print(msg)
-        return pnames, pvalues, statuses
-
-    def apply_pv_dict(self, pv_dict: dict):
-        """
-        Apply all parameter values from the provided dictionary.
-        Raise KeyError if any parameter is missing.
+        Update parameter values from the provided dictionary.
 
         Parameters
         ----------
         pv_dict : dict
             Dictionary mapping parameter names to their desired values.
         """
-        variables = {
-            pname: param
-            for pname, param in self._recipe._parameters.items()
-            if self._recipe.isFree(param)
-        }
+        wrong_msg = ""
+        for pname in pv_dict:
+            wrong_msg += self.check_parameter_name(pname)
+        if wrong_msg:
+            raise KeyError(wrong_msg)
         for pname, pvalue in pv_dict.items():
-            if pname not in variables:
-                raise KeyError(f"Parameter {pname} not found or is fixed.")
-            variables[pname].setValue(pvalue)
+            self._recipe._parameters[pname].setValue(pvalue)
 
-    def get_pv_dict(self):
+    @if_ready
+    def _get_parameter_values(self):
         """
         Get current parameter values as a dictionary.
 
@@ -384,21 +227,67 @@ class PDFAdapter(BaseAdapter):
         pv_dict : dict
             Dictionary mapping parameter names to their current values.
         """
-        pv_dict = {
-            pname: param.value
-            for pname, param in self._recipe._parameters.items()
+        return {
+            pname: self._recipe._parameters[pname].value
+            for pname in self._recipe._parameters
         }
-        return pv_dict
 
-    def apply_parameter_values_in_slot(self, values: list):
+    @if_ready
+    def apply_payload(self, payload):
+        if self.get_payload() == payload:
+            return
+        self._apply_parameter_values(payload)
+
+    @if_ready
+    def get_payload(self):
+        return self._get_parameter_values()
+
+    @if_ready
+    def action_func_factory(self, action_names):
         """
-        Apply parameter values from the `parameter_values_in_slots`
-        to the current model. Only parameters present in the current
-        model will be updated.
+        Generate operations to be performed in the workflow. Use factory to
+        allow more flexible action functions in the future.
+
+        Attributes
+        ----------
+        action_names: list of str
+            The action_names appear in the DAG. This function maps the action
+            names into the action function.
         """
-        parameter_names = self.parameter_names_in_slots
-        for i, name in enumerate(parameter_names):
-            if name in self.parameters and self._recipe.isFree(
-                self.parameters[name]
-            ):
-                self.parameters[name].setValue(values[i])
+
+        def action_func():
+            # FIXME: currently only allow 'free' variables due to the
+            # compatible issues encountered when initialize the self.conunc
+            # variable in FitResults
+            for name in action_names:
+                if name == "all":
+                    self._recipe.free("all")
+                    break
+                self._recipe.free(name)
+            least_squares(
+                self._recipe.residual, self._recipe.values, x_scale="jac"
+            )
+
+        return action_func
+
+    @if_ready
+    def _residual_scalar(self):
+        """
+        Copied from Fitresult._calculateMetrics
+        """
+        y = self._recipe.pdfcontribution.profile.y
+        ycalc = self._recipe.pdfcontribution._eq()
+        dy = self._recipe.pdfcontribution.profile.dy
+        num = numpy.abs(y - ycalc)
+        y = numpy.abs(y)
+        chiv = num / dy
+        cumchi2 = numpy.cumsum(chiv**2)
+        # avoid index error for empty array
+        yw = y / dy
+        yw2tot = numpy.dot(yw, yw)
+        if yw2tot == 0.0:
+            yw2tot = 1.0
+        cumrw = numpy.sqrt(cumchi2 / yw2tot)
+        # avoid index error for empty array
+        rw = cumrw[-1:].sum()
+        return rw

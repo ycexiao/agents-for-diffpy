@@ -1,23 +1,96 @@
 import networkx as nx
 import uuid
-from BaseAdapter import BaseAdapter
-import numpy
-import json
+import copy
 
 
-class FitDAG:
-    "A directed acyclic graph (DAG) representing fitting instructions."
+class FitDAG(nx.DiGraph):  # or FitForest?
+    """
+    A directed acyclic graph (DAG) representing fitting instructions.
 
-    def __init__(self, adapter=BaseAdapter):
-        self.init_from_adapter(adapter)
+    Each node defines an action executed under the context of the input from
+    root node and the payload from the parent node. Each action updates
+    the payload in the current node.
 
-    def init_from_adapter(self, adapter):
-        self.allowed_actions = [
-            adapter.parameter_names_in_slots[i]
-            for i in range(len(adapter.parameter_names_in_slots))
-            if adapter.parameter_slots_mask[i] == 1
-        ]
-        self.allowed_actions.append("all")
+    # FIXME: This is the current policy. We could allow more flexible policies
+    # e.g. combine the payloads from multiple parent nodes or root nodes.
+    # modify get_input_source and get_payload_source methods accordingly.
+
+    If multiple parent nodes exist, use the one has the nearest distance to
+    the root node.
+
+    If multiple root nodes exist, use the one has the nearest distance to the
+    current node.
+
+    payload is any data structure that is updated along the DAG.
+
+
+    Node Attributes
+    ----------------
+    description: str
+        string description of the current node
+    inputs: dict
+    action: list
+        list of operations being executed in the current node
+
+    Edge Attributes
+    ---------------
+    description: str
+        string description of the current edge
+    patch: callable
+        function to modify its sucessors' context
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.default_node = {
+            "description": "",
+            "inputs": {},
+            "payload": {},
+            "level": 100,
+            "action": [],
+            "name": "",
+            "id": None,
+        }
+
+        # FIXME: Edges defines the relations between nodes, e.g. how the child
+        # node's context is modified by the parent node's outcome.
+        # For now, we only define a placeholder function.
+        self.default_edge = {
+            "description": "",
+            "u": None,
+            "v": None,
+            "propagate_func": lambda x: x,
+        }
+
+    def furnish_node_dict(self, node_dict):
+        template_node = copy.deepcopy(self.default_node)
+        node_dict = {
+            key: (
+                node_dict[key]
+                if key in node_dict.keys()
+                else template_node[key]
+            )
+            for key in template_node.keys()
+        }
+        # FIXME: refine the error later
+        assert "action" in node_dict
+        node_dict["name"] = node_dict.get(
+            "name", ", ".join(node_dict["action"])
+        )
+        node_dict["id"] = node_dict.get("id", str(uuid.uuid4()))
+        return node_dict
+
+    def furnish_edge_dict(self, edge_dict):
+        template_edge = copy.deepcopy(self.default_edge)
+        edge_dict = {
+            key: (
+                edge_dict[key]
+                if key in edge_dict.keys()
+                else template_edge[key]
+            )
+            for key in template_edge.keys()
+        }
+        return edge_dict
 
     def from_dict(self, data):
         """
@@ -30,29 +103,30 @@ class FitDAG:
             e.g.:
             {
                 "nodes": [
-                    {"id": "1", "value": "scale"},
-                    {"id": "2", "value": "alpha"},
-                    {"id": "3", "value": "all"},
+                    {"id": "1", "name": "node1", "action": "scale"},
+                    {"id": "2", "name": "node2", "action": "alpha"},
+                    {"id": "3", "name": "node3", "action": "all"},
                 ],
-                "edges": [("1", "2"), ("2", "3")],
+                "edges": [
+                {"u": "1", "v": "2"},
+                {"u": "2", "v": "3"}
+                ],
             }
         """
-        self.graph = nx.DiGraph()
         all_node_values = []
         for node in data["nodes"]:
-            value = [v.strip() for v in node["value"].split(",")]
-            self.graph.add_node(
-                node["id"], value=value, runtime_status="pending"
-            )
-            all_node_values.extend(value)
+            node["action"] = [v.strip() for v in node["action"].split(",")]
+            node = self.furnish_node_dict(node)
+            self.add_node(node["id"], **node)
+            all_node_values.extend(node["action"])
         for edge in data["edges"]:
-            self.graph.add_edge(edge[0], edge[1])
-        all_node_values = list(set(all_node_values))
-        self.__check_node_values(all_node_values)
+            edge = self.furnish_edge_dict(edge)
+            self.add_edge(edge["u"], edge["v"], **edge)
+        self._prepare_nodes_structure()
 
     def from_str(self, dag_str):
         """
-        Parse a linear DIAG from a string representation.
+        Parse a linear DAG from a string representation.
 
         Parameters
         ----------
@@ -60,90 +134,79 @@ class FitDAG:
             String representation of the fitting diagram.
             E.g.: "scale->alpha->a->qdamp->all"
         """
-        self.graph = nx.DiGraph()
-        nodes_values = [
+        actions = [
             [v.strip() for v in value.split(",")]
             for value in dag_str.split("->")
         ]
-        all_node_values = list(
-            set([v for sublist in nodes_values for v in sublist])
-        )
-        parent_node_id = str(uuid.uuid4())
-        self.graph.add_node(
-            parent_node_id, value=nodes_values[0], runtime_status="pending"
-        )
-        for i in range(1, len(nodes_values)):
-            child_node_id = str(uuid.uuid4())
-            self.graph.add_node(
-                child_node_id, value=nodes_values[i], runtime_status="pending"
-            )
-            self.graph.add_edge(parent_node_id, child_node_id)
+        node = {"id": str(uuid.uuid4()), "action": actions[0]}
+        node = self.furnish_node_dict(node)
+        self.add_node(node["id"], **node)
+        parent_node_id = node["id"]
+        for i in range(1, len(actions)):
+            node = {"id": str(uuid.uuid4()), "action": actions[i]}
+            node = self.furnish_node_dict(node)
+            self.add_node(node["id"], **node)
+            child_node_id = node["id"]
+            self.add_edge(parent_node_id, child_node_id)
             parent_node_id = child_node_id
-        self.__check_node_values(all_node_values)
+        self._prepare_nodes_structure()
 
-    def tag_node(self, node_id, tag_value):
-        """
-        Tag a node in the fitting diagram with a specific value.
-
-        Parameters
-        ----------
-        node_id : str
-            The ID of the node to be tagged.
-        tag_value : any
-            The value to tag the node with.
-        """
-        assert tag_value in [
-            "pending",
-            "initialized",
-            "completed",
-            "failed",
+    @property
+    def root_nodes(self):
+        return [
+            node_id for node_id in self.nodes() if self.in_degree(node_id) == 0
         ]
-        self.__check_node_ids([node_id])
-        self.graph.nodes[node_id]["tag"] = tag_value
 
-    def tag_is(self, node_id, tag_value):
-        assert tag_value in [
-            "pending",
-            "initialized",
-            "completed",
-            "failed",
+    @property
+    def leaf_nodes(self):
+        return [
+            node_id
+            for node_id in self.nodes()
+            if self.out_degree(node_id) == 0
         ]
-        self.__check_node_ids([node_id])
-        return self.graph.nodes[node_id]["tag"] == tag_value
 
-    def to_json(self):
-        """
-        Serialize the fitting diagram to a JSON-compatible dictionary.
-
-        Returns
-        -------
-        dict
-            A dictionary representation of the fitting diagram.
-        """
-        data = {
-            "nodes": [
-                {"id": node, "value": self.graph.nodes[node]["value"]}
-                for node in self.graph.nodes
-            ],
-            "edges": [[u, v] for u, v in self.graph.edges],
-        }
-        json_str = json.dumps(data, indent=4)
-        return json_str
-
-    def __check_node_values(self, nodes_values):
-        undifined_operations = set(nodes_values) - set(self.allowed_actions)
-        if undifined_operations:
-            raise ValueError(
-                f"Fitting diagram contains undefined operations: "
-                f"{sorted(undifined_operations)}."
-            )
-
-    def __check_node_ids(self, nodes_ids):
-        undifined_node_ids = [
-            node_id for node_id in nodes_ids if node_id not in self.graph.nodes
+    def load_inputs(self, inputs, names=None):
+        root_names = [
+            self.nodes[node_id]["name"] for node_id in self.root_nodes
         ]
-        if undifined_node_ids:
-            raise ValueError(
-                f"Fitting diagram contains undefined node IDs: "
-                f"{sorted(undifined_node_ids)}."
-            )
+        if names:
+            for name in names:
+                # FIXME: refine the error later
+                assert name in root_names
+                index = root_names.index(name)
+                self.nodes[self.root_nodes[index]]["inputs"] = inputs[index]
+        else:
+            for i, root_node_id in enumerate(self.root_nodes):
+                self.nodes[root_node_id]["inputs"] = inputs[i]
+
+    def _prepare_nodes_structure(self):
+        self.map_to_root_node = {}
+        self.node_levels = {}
+        for root_node_id in self.root_nodes:
+            levels = nx.single_source_shortest_path_length(self, root_node_id)
+            for node_id, level in levels.items():
+                if self.map_to_root_node.get(node_id, None) is not None:
+                    # FIXME: refine the error later
+                    assert self.map_to_root_node[node_id] != level
+                    if self.map_to_root_node[node_id] > level:
+                        self.map_to_root_node[node_id] = root_node_id
+                        self.node_levels[node_id] = level
+                    else:
+                        continue
+                else:
+                    self.map_to_root_node[node_id] = root_node_id
+                    self.node_levels[node_id] = level
+
+    def get_input_source(self, node_id):
+        return self.map_to_root_node.get(node_id, None)
+
+    def get_payload_source(self, node_id):
+        parent_ids = list(self.predecessors(node_id))
+        levels = [
+            self.node_levels.get(parent_id, float("inf"))
+            for parent_id in parent_ids
+        ]
+        return parent_ids[levels.index(min(levels))]
+
+    def save():
+        pass
