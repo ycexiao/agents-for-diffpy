@@ -5,14 +5,15 @@ from FitDAG import FitDAG
 from pathlib import Path
 from diffpy.srfit.fitbase import FitResults
 import time
+import pickle
 
 # A simple test for PDFAdater
 profile_path = Path().cwd() / "data" / "Ni.gr"
 structure_path = Path().cwd() / "data" / "Ni.cif"
 adapter = PDFAdapter()
 inputs = {
-    "profile_path": str(profile_path),
-    "structure_path": str(structure_path),
+    "profile_string": profile_path.read_text(),
+    "structure_string": structure_path.read_text(),
     "xmin": 1.5,
     "xmax": 50,
     "dx": 0.01,
@@ -34,17 +35,15 @@ adapter.apply_payload(payload)
 
 # A simple test for FitDAG
 dag = FitDAG()
-dag.from_str("a")
+dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
 dag.load_inputs([inputs])
-# print(dag.nodes[dag.root_nodes[0]])
-# print(len(dag.nodes[dag.root_nodes[0]]["inputs"]))
 
 # A simple test for FitRunner
 start_time = time.time()
 runner = FitRunner()
 dag, adapters_dict = runner.run_workflow(dag, PDFAdapter, [inputs], [payload])
-del adapters_dict
-
 end_time = time.time()
 print(f"FitRunner took {end_time - start_time} seconds.")
 # have to separeate the visualization part to avoid multiprocessing issues
+with open("debug_dag.pkl", "wb") as f:
+    pickle.dump(dag.clean_copy(with_payload=True, with_besides_str=True), f)

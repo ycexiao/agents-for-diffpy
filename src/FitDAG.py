@@ -1,6 +1,12 @@
 import networkx as nx
 import uuid
 import copy
+from collections import OrderedDict
+import pickle
+
+
+def default_propagate_func(parent_node, child_node):
+    return parent_node["payload"]
 
 
 class FitDAG(nx.DiGraph):  # or FitForest?
@@ -42,6 +48,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
 
     def __init__(self):
         super().__init__()
+        self.all_names = []
         self.default_node = {
             "description": "",
             "inputs": {},
@@ -59,7 +66,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             "description": "",
             "u": None,
             "v": None,
-            "propagate_func": lambda x: x,
+            "propagate_func": default_propagate_func,
         }
 
     def furnish_node_dict(self, node_dict):
@@ -74,9 +81,22 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         }
         # FIXME: refine the error later
         assert "action" in node_dict
-        node_dict["name"] = node_dict.get(
-            "name", ", ".join(node_dict["action"])
+        name = (
+            node_dict["name"]
+            if node_dict["name"] != ""
+            else ", ".join(node_dict["action"])
         )
+        if name in self.all_names:
+            count = 1
+            new_name = f"{name}_{count}"
+            while new_name in self.all_names:
+                count += 1
+                new_name = f"{name}_{count}"
+            name = new_name
+        else:
+            name = name
+            self.all_names.append(name)
+        node_dict["name"] = name
         node_dict["id"] = node_dict.get("id", str(uuid.uuid4()))
         return node_dict
 
@@ -147,9 +167,39 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             node = self.furnish_node_dict(node)
             self.add_node(node["id"], **node)
             child_node_id = node["id"]
-            self.add_edge(parent_node_id, child_node_id)
+            edge = self.furnish_edge_dict({})
+            self.add_edge(parent_node_id, child_node_id, **edge)
             parent_node_id = child_node_id
         self._prepare_nodes_structure()
+
+    def from_workflow(self, filename):
+        """
+        Load the fitting diagram from a serialized DAG file.
+
+        Parameters
+        ----------
+        filename : str
+            Path to the serialized DAG file.
+        """
+        with open(filename, "rb") as f:
+            graph = pickle.load(f)
+        for node_id, node_content in graph.nodes(data=True):
+            self.add_node(node_id, **node_content)
+        for u, v, edge_content in graph.edges(data=True):
+            self.add_edge(u, v, **edge_content)
+        self._prepare_nodes_structure()
+
+    def get_node_by_name(self, name):
+        nodes = OrderedDict()
+        for node_id, node_content in self.nodes(data=True):
+            if node_content["name"].split("_")[0] == name.split("_")[0]:
+                nodes[node_id] = node_content
+        return nodes
+
+    def get_edge_by_name(self, u_name, v_name):
+        u_node_id = list(self.get_node_by_name(u_name).keys())[0]
+        v_node_id = list(self.get_node_by_name(v_name).keys())[0]
+        return self[u_node_id][v_node_id]
 
     @property
     def root_nodes(self):
@@ -208,5 +258,47 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         ]
         return parent_ids[levels.index(min(levels))]
 
-    def save():
-        pass
+    def clean_copy(self, with_payload=False, with_besides_str=False):
+        graph = (
+            nx.DiGraph()
+        )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
+        if with_payload and with_besides_str:
+            filter_func = lambda k, v: True
+        elif (not with_payload) and with_besides_str:
+            filter_func = lambda k, v: k != "payload"
+        elif with_payload and (not with_besides_str):
+            filter_func = lambda k, v: isinstance(v, str)
+        else:
+            filter_func = lambda k, v: (k != "payload") and isinstance(v, str)
+        for node_id, node_content in self.nodes(data=True):
+            node_content = {
+                k: v for k, v in node_content.items() if filter_func(k, v)
+            }
+            graph.add_node(node_id, **node_content)
+
+        for u, v, edge_content in self.edges(data=True):
+            edge_content = {
+                k: v for k, v in edge_content.items() if filter_func(k, v)
+            }
+            graph.add_edge(u, v, **edge_content)
+        return graph
+
+    def render(self, filename="graph.html"):
+        from pyvis.network import Network
+
+        # Create PyVis network
+        net = Network(
+            directed=True,
+            notebook=False,  # IMPORTANT
+            cdn_resources="remote",  # IMPORTANT
+        )
+
+        graph = self.clean_copy(with_payload=False, with_besides_str=False)
+        node_ids, node_lables = [], []
+        for node_id, node_content in graph.nodes(data=True):
+            node_ids.append(node_id)
+            node_lables.append(node_content["name"])
+        net.add_nodes(node_ids, label=node_lables)
+        net.add_edges(graph.edges())
+        # Save and render
+        net.write_html(filename)

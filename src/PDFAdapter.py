@@ -98,8 +98,8 @@ class PDFAdapter(BaseAdapter):
 
     def load_inputs(self, inputs):
         recipe_input_keys = [
-            "structure_path",
-            "profile_path",
+            "structure_string",
+            "profile_string",
             "xmin",
             "xmax",
             "dx",
@@ -113,8 +113,8 @@ class PDFAdapter(BaseAdapter):
 
     def _make_recipe(
         self,
-        structure_path,
-        profile_path,
+        structure_string,
+        profile_string,
         xmin=None,
         xmax=None,
         dx=None,
@@ -132,12 +132,12 @@ class PDFAdapter(BaseAdapter):
         """
         # load structure and profile
         stru_parser = getParser("cif")
-        structure = stru_parser.parse(Path(structure_path).read_text())
+        structure = stru_parser.parse(structure_string)
         sg = getattr(stru_parser, "spacegroup", None)
         spacegroup = sg.short_name if sg else "P1"
         profile = Profile()
         parser = PDFParser()
-        parser.parseFile(str(profile_path))
+        parser.parseString(profile_string)
         profile.loadParsedData(parser)
         # set up PDF generator, contribution, and recipe
         xmin = xmin if xmin is not None else numpy.min(profile._xobs)
