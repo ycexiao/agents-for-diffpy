@@ -1,18 +1,20 @@
-# DAG
-from PDFAdapter import PDFAdapter
-from FitRunner import FitRunner
-from FitDAG import FitDAG
 from pathlib import Path
-from diffpy.srfit.fitbase import FitResults
+from PDFAdapter import PDFAdapter
+from FitDAG import FitDAG
+from FitRunner import FitRunner
 import time
-import pickle
+import re
 
-# A simple test for PDFAdater
-profile_path = Path().cwd() / "data" / "Ni.gr"
+data_dir_path = Path().cwd() / "data" / "sequential_fit"
+files = [file for file in data_dir_path.glob("*.gr")]
+order = [int(re.search(r"(\d+)K\.gr", file.name).group(1)) for file in files]
+files = [file for _, file in sorted(zip(order, files))]
+
 structure_path = Path().cwd() / "data" / "Ni.cif"
-adapter = PDFAdapter()
+
+# Configure the first file
 inputs = {
-    "profile_string": profile_path.read_text(),
+    "profile_string": files[0].read_text(),
     "structure_string": structure_path.read_text(),
     "xmin": 1.5,
     "xmax": 50,
@@ -20,8 +22,7 @@ inputs = {
     "qmax": 25.0,
     "qmin": 0.1,
 }
-adapter.load_inputs(inputs)
-# print(adapter.get_payload())
+
 payload = {
     "scale": 0.4,
     "a": 3.52,
@@ -30,20 +31,18 @@ payload = {
     "qdamp": 0.04,
     "qbroad": 0.02,
 }
-adapter.apply_payload(payload)
-# print(adapter.get_payload())
 
-# A simple test for FitDAG
+# show initial residual
+adapter = PDFAdapter()
+adapter.load_inputs(inputs)
+print(adapter._residual_scalar())
+
 dag = FitDAG()
 dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
 dag.load_inputs([inputs])
 
-# A simple test for FitRunner
 start_time = time.time()
 runner = FitRunner()
 dag, adapters_dict = runner.run_workflow(dag, PDFAdapter, [inputs], [payload])
 end_time = time.time()
 print(f"FitRunner took {end_time - start_time} seconds.")
-# have to separeate the visualization part to avoid multiprocessing issues
-with open("debug_dag.pkl", "wb") as f:
-    pickle.dump(dag.clean_copy(with_payload=True, with_besides_str=True), f)

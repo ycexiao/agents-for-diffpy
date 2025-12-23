@@ -209,6 +209,8 @@ class PDFAdapter(BaseAdapter):
         pv_dict : dict
             Dictionary mapping parameter names to their desired values.
         """
+        if pv_dict == {} or pv_dict is None:
+            return
         wrong_msg = ""
         for pname in pv_dict:
             wrong_msg += self.check_parameter_name(pname)
@@ -216,6 +218,7 @@ class PDFAdapter(BaseAdapter):
             raise KeyError(wrong_msg)
         for pname, pvalue in pv_dict.items():
             self._recipe._parameters[pname].setValue(pvalue)
+        self._recipe._prepare()
 
     @if_ready
     def _get_parameter_values(self):
