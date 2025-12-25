@@ -15,13 +15,11 @@ dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
 
 another_dag = dag.clean_copy(
     with_payload=False,
-    with_besides_str=True,
     with_same_id=False,
     instance_type="FitDAG",
 )
 
 parent_node_id, _ = dag.get_node_by_name("all")[0]
-
 child_node_id, _ = another_dag.get_node_by_name("start")[0]
 child_node_id = list(another_dag.successors(child_node_id))[0]
 
@@ -30,8 +28,8 @@ dag.merge_dag(another_dag, parent_node_id, child_node_id)
 
 for name in dag.all_names:
     node_id = dag.get_node_by_name(name)[0][0]
-    input_source_id = dag.get_input_source(node_id)
-    parent_id = dag.get_payload_source(node_id)
+    input_source_id = dag.get_input_source_node_id(node_id)
+    parent_id = dag.get_payload_source_node_id(node_id)
     print(
         f"name: {name} ".ljust(20)
         + f"source: {dag.nodes[input_source_id]['name']}".ljust(30)
@@ -78,7 +76,7 @@ payload = {
 
 start_time = time.time()
 runner = FitRunner()
-dag, adapters_dict, wait_list = runner.run_workflow(
+dag = runner.run_workflow(
     dag,
     PDFAdapter,
     inputs,
@@ -86,7 +84,6 @@ dag, adapters_dict, wait_list = runner.run_workflow(
 )
 end_time = time.time()
 print(f"FitRunner took {end_time - start_time} seconds.")
-print([dag.nodes[node_id]["name"] for node_id in adapters_dict.keys()])
 
 
 def plot(adapter):
@@ -139,14 +136,14 @@ def plot(adapter):
 
 names = ["all", "all_1"]
 inputs_indx = [0, 1]
-for i, name in enumerate(names):
-    node_content = dag.get_node_by_name(name)[0][1]
-    print(node_content["name"])
-    print(node_content["payload"])
-    payload = node_content["payload"]
-    adapter = PDFAdapter()
-    adapter.load_inputs(inputs[inputs_indx[i]])
-    adapter.apply_payload(payload)
-    adapter._recipe._prepare()
-    print(adapter._residual_scalar())
-    plot(adapter)
+# for i, name in enumerate(names):
+#     node_content = dag.get_node_by_name(name)[0][1]
+#     print(node_content["name"])
+#     print(node_content["payload"])
+#     payload = node_content["payload"]
+#     adapter = PDFAdapter()
+#     adapter.load_inputs(inputs[inputs_indx[i]])
+#     adapter.apply_payload(payload)
+#     adapter._recipe._prepare()
+#     print(adapter._residual_scalar())
+#     plot(adapter)

@@ -46,23 +46,16 @@ dag.load_inputs([inputs])
 # A simple test for FitRunner
 start_time = time.time()
 runner = FitRunner()
-dag, adapters_dict, wait_list = runner.run_workflow(
-    dag, PDFAdapter, [inputs], [payload]
-)
+dag = runner.run_workflow(dag, PDFAdapter, [inputs], [payload])
 end_time = time.time()
 print(f"FitRunner took {end_time - start_time} seconds.")
-print(list(adapters_dict.values())[0]._residual_scalar())
 # have to separeate the visualization part to avoid multiprocessing issues
 # with open("debug_dag.pkl", "wb") as f:
 #     pickle.dump(dag.clean_copy(with_payload=True, with_besides_str=True), f)
 
-copied_dag = dag.clean_copy(with_payload=True, with_besides_str=False)
-result_nodes = []
-for node_id, node_content in copied_dag.nodes(data=True):
-    result_nodes.append((node_id, node_content))
 
-with open("tree_debug.json", "w") as f:
-    json.dump(dag.to_json(), f, indent=4)
+# with open("tree_debug.json", "w") as f:
+#     json.dump(dag.to_json(), f, indent=4)
 
 
 # adapter = adapters_dict[list(adapters_dict.keys())[0]]

@@ -5,8 +5,8 @@ from collections import OrderedDict
 import pickle
 
 
-def default_propagate_func(parent_node, child_node):
-    child_node["payload"] = copy.deepcopy(parent_node["payload"])
+def default_pass_payload_func(parent_node, child_node):
+    child_node["buffer"]["payload"] = parent_node["payload"]
 
 
 class FitDAG(nx.DiGraph):  # or FitForest?
@@ -49,9 +49,11 @@ class FitDAG(nx.DiGraph):  # or FitForest?
     def __init__(self):
         super().__init__()
         self.all_names = []
+        self.unique_names = []  # names without added suffixes
         self.default_node = {
             "description": "",
             "inputs": {},
+            "buffer": {},
             "payload": {},
             "level": 100,
             "type": "normal",  # could be "start", "normal", "end"
@@ -66,7 +68,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             "description": "",
             "u": None,
             "v": None,
-            "propagate_func": default_propagate_func,
+            "pass_payload_func": default_pass_payload_func,
         }
 
     def furnish_node_dict(self, node_dict):
@@ -86,7 +88,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             if node_dict["name"] != ""
             else ", ".join(node_dict["action"])
         )
-        if name in self.all_names:
+        if name in self.unique_names:
             count = 1
             new_name = f"{name}_{count}"
             while new_name in self.all_names:
@@ -96,6 +98,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             self.all_names.append(name)
         else:
             name = name
+            self.unique_names.append(name)
             self.all_names.append(name)
         node_dict["name"] = name
         return node_dict
@@ -237,7 +240,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
                 self.nodes[root_node_id]["inputs"] = inputs[i]
 
     def _prepare_nodes_structure(self):
-        self.map_to_root_node = {}
+        self._map_to_root_node = {}
         self.node_levels = {}
         # Add start nodes if not exist
         for root_node_id in self.root_nodes:
@@ -257,39 +260,48 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         for root_node_id in self.root_nodes:
             levels = nx.single_source_shortest_path_length(self, root_node_id)
             for node_id, level in levels.items():
-                if self.map_to_root_node.get(node_id, None) is not None:
+                if self._map_to_root_node.get(node_id, None) is not None:
                     # FIXME: refine the error later
                     assert self.node_levels[node_id] != level
                     if self.node_levels[node_id] > level:
-                        self.map_to_root_node[node_id] = root_node_id
+                        self._map_to_root_node[node_id] = root_node_id
                         self.node_levels[node_id] = level
                     else:
                         continue
                 else:
-                    self.map_to_root_node[node_id] = root_node_id
+                    self._map_to_root_node[node_id] = root_node_id
                     self.node_levels[node_id] = level
 
         for node_id, level in self.node_levels.items():
             self.nodes[node_id]["level"] = self.node_levels[node_id]
 
-    def get_input_source(self, node_id):
-        return self.map_to_root_node.get(node_id, None)
+        self.input_source_node_id_dict = {
+            id: self._map_to_root_node[id] for id in self.nodes()
+        }
+        self.payload_source_node_id_dict = {}
+        for node_id in self.nodes():
+            if node_id in self.root_nodes:
+                self.payload_source_node_id_dict[node_id] = node_id
+            else:
+                parent_ids = list(self.predecessors(node_id))
+                levels = [
+                    self.node_levels.get(parent_id, float("inf"))
+                    for parent_id in parent_ids
+                ]
+                source_parent_id = parent_ids[levels.index(max(levels))]
+                self.payload_source_node_id_dict[node_id] = source_parent_id
 
-    def get_payload_source(self, node_id):
-        if node_id in self.root_nodes:
-            return node_id
-        parent_ids = list(self.predecessors(node_id))
-        levels = [
-            self.node_levels.get(parent_id, float("inf"))
-            for parent_id in parent_ids
-        ]
-        return parent_ids[levels.index(max(levels))]
+    def get_input_source_node_id(self, node_id):
+        return self.input_source_node_id_dict[node_id]
+
+    def get_payload_source_node_id(self, node_id):
+        return self.payload_source_node_id_dict[node_id]
 
     def clean_copy(
         self,
         with_payload=False,
-        with_besides_str=False,
         with_same_id=True,
+        with_buffer=False,
         instance_type="networkx",
     ):
         if instance_type == "networkx":
@@ -298,24 +310,25 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
         elif instance_type == "FitDAG":
             graph = FitDAG()
+            graph.all_names = copy.deepcopy(self.all_names)
+            graph.unique_names = copy.deepcopy(self.unique_names)
         else:
             raise ValueError(
                 f"Unsupported instance_type: {instance_type}. "
                 "Supported types are 'networkx' and 'FitDAG'."
             )
         id_maps = {}
-        if with_payload and with_besides_str:
-            filter_func = lambda k, v: True
-        elif (not with_payload) and with_besides_str:
-            filter_func = lambda k, v: k != "payload"
-        elif with_payload and (not with_besides_str):
-            filter_func = lambda k, v: isinstance(v, str)
-        else:
-            filter_func = lambda k, v: (k != "payload") and isinstance(v, str)
+        payload_filter = lambda k, v: ((k, {}) if k == "payload" else (k, v))
+        buffer_filter = lambda k, v: ((k, {}) if k == "buffer" else (k, v))
+        filer_func = lambda k, v: (k, v)
+        if not with_payload:
+            filter_func = lambda k, v: payload_filter(*filer_func(k, v))
+        if not with_buffer:
+            filter_func = lambda k, v: buffer_filter(*filer_func(k, v))
         for node_id, node_content in self.nodes(data=True):
-            node_content = {
-                k: v for k, v in node_content.items() if filter_func(k, v)
-            }
+            node_content = dict(
+                [filter_func(k, v) for k, v in node_content.items()]
+            )
             if with_same_id:
                 id_maps[node_id] = node_id
             else:
@@ -325,9 +338,9 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             graph.add_node(node_id, **node_content)
 
         for u, v, edge_content in self.edges(data=True):
-            edge_content = {
-                k: v for k, v in edge_content.items() if filter_func(k, v)
-            }
+            edge_content = dict(
+                filter_func(k, v) for k, v in edge_content.items()
+            )
             graph.add_edge(id_maps[u], id_maps[v], **edge_content)
         return graph
 
@@ -363,7 +376,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             cdn_resources="remote",  # IMPORTANT
         )
 
-        graph = self.clean_copy(with_payload=False, with_besides_str=False)
+        graph = self.clean_copy(with_payload=False, instance_type="networkx")
         node_ids, node_lables = [], []
         for node_id, node_content in graph.nodes(data=True):
             node_ids.append(node_id)
@@ -376,6 +389,19 @@ class FitDAG(nx.DiGraph):  # or FitForest?
     def clear(self):
         super().clear()
         self.all_names = []
+
+    def hasExecuted(self, node_id):
+        node = self.nodes[node_id]
+        return node["payload"] != {}
+
+    def hasInitialized(self, node_id):
+        node = self.nodes[node_id]
+        b1 = "payload" in node["buffer"] and node["buffer"]["payload"] != {}
+        b2 = (
+            "adapter" in node["buffer"]
+            and node["buffer"]["adapter"] is not None
+        )
+        return b1 and b2
 
     def merge_dag(
         self,
