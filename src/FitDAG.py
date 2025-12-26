@@ -3,6 +3,7 @@ import uuid
 import copy
 from collections import OrderedDict
 import pickle
+import re
 
 
 def default_pass_payload_func(parent_node, child_node):
@@ -390,10 +391,6 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         super().clear()
         self.all_names = []
 
-    def hasExecuted(self, node_id):
-        node = self.nodes[node_id]
-        return node["payload"] != {}
-
     def hasInitialized(self, node_id):
         node = self.nodes[node_id]
         b1 = "payload" in node["buffer"] and node["buffer"]["payload"] != {}
@@ -402,6 +399,9 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             and node["buffer"]["adapter"] is not None
         )
         return b1 and b2
+
+    def hasCompleted(self, node_id):
+        return self.nodes[node_id]["payload"] != {}
 
     def merge_dag(
         self,

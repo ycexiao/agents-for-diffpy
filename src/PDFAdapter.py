@@ -240,13 +240,22 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def apply_payload(self, payload):
-        if self.get_payload() == payload:
+        if payload is None:
             return
-        self._apply_parameter_values(payload)
+        py_dict = {
+            pname: payload[pname]
+            for pname in self._recipe._parameters
+            if pname in payload
+        }
+        if self._get_parameter_values() == py_dict:
+            return
+        self._apply_parameter_values(py_dict)
 
     @if_ready
     def get_payload(self):
-        return self._get_parameter_values()
+        payload = self._get_parameter_values()
+        payload["ycalc"] = self._recipe.pdfcontribution._eq()
+        return payload
 
     @if_ready
     def action_func_factory(self, action_names):
@@ -265,6 +274,8 @@ class PDFAdapter(BaseAdapter):
             # FIXME: currently only allow 'free' variables due to the
             # compatible issues encountered when initialize the self.conunc
             # variable in FitResults
+            if action_names == []:
+                return None
             for name in action_names:
                 if name == "all":
                     self._recipe.free("all")

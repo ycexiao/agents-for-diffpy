@@ -5,6 +5,9 @@ from FitRunner import FitRunner
 import time
 import re
 import pickle
+import networkx as nx
+import threading
+from FitAnalyzer import FitAnalyzer
 
 data_dir_path = Path().cwd() / "data" / "sequential_fit"
 files = [file for file in data_dir_path.glob("*.gr")]
@@ -42,7 +45,7 @@ dag = template_dag.clean_copy(
     instance_type="FitDAG",
 )
 
-files = files[:5]
+files = files[:2]
 for i in range(1, len(files)):
     another_dag = template_dag.clean_copy(
         with_payload=False,
@@ -73,20 +76,32 @@ all_inputs = [
 all_payloads = [None for _ in range(len(files))]
 all_payloads[0] = payload
 
-dag.render("example_dag.html")
+lock = threading.Lock()
+runner = FitRunner(lock=lock)
+analyzer = FitAnalyzer(lock=lock)
+# analyzer.watch(
+#     dag,
+#     "all",
+#     "a",
+# )
+analyzer.track(
+    dag,
+    dag.get_node_by_name("start")[0][0],
+    dag.get_node_by_name(f"all_{len(files)-1}")[0][0],
+    "ycalc",
+    "replace",
+)
+runner.run_workflow(dag, PDFAdapter, all_inputs, all_payloads, lock)
+analyzer.on(dag, life_time=300)  # must after runner.run_workflow
+runner.thread.join()
 
-start_time = time.time()
-runner = FitRunner()
-dag = runner.run_workflow(dag, PDFAdapter, all_inputs, all_payloads)
-end_time = time.time()
-print(f"FitRunner took {end_time - start_time} seconds.")
-
-with open("example_dag.pkl", "wb") as f:
-    pickle.dump(
-        dag.clean_copy(
-            with_payload=True,
-            with_same_id=True,
-            instance_type="FitDAG",
-        ),
-        f,
-    )
+# print(dag.watch("all", ["a"]))
+# with open("example_dag.pkl", "wb") as f:
+#     pickle.dump(
+#         dag.clean_copy(
+#             with_payload=True,
+#             with_same_id=True,
+#             instance_type="FitDAG",
+#         ),
+#         f,
+#     )

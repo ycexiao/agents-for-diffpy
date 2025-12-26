@@ -1,15 +1,14 @@
-from BaseAdapter import BaseAdapter
-from PDFAdapter import PDFAdapter
 from FitDAG import FitDAG
-from scipy.optimize import least_squares
-from collections import OrderedDict
-import uuid
-import copy
-from typing import Literal
-from networkx import DiGraph
 from FitDAG import FitDAG
-import numpy
 import warnings
+import threading
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import time
+import psutil, os
+import re
+import networkx as nx
+import copy
 
 # copy.deepcopy(adapter)
 # ERROR   RuntimeError: Pickling of
@@ -18,10 +17,12 @@ import warnings
 
 
 class FitRunner:
-    def __init__(self):
-        pass
+    def __init__(self, lock):
+        self.dag = None
+        self.thread = None
+        self.lock = lock
 
-    def run_node(
+    def _run_node(
         self,
         dag,
         node_id: str,
@@ -31,32 +32,40 @@ class FitRunner:
         node = dag.nodes[node_id]
         adapter = node["buffer"]["adapter"]
         adapter.apply_payload(node["buffer"]["payload"])
-        node["payload"] = adapter.get_payload()
+        adapter.action_func_factory(node["action"])()
+        with self.lock:
+            # Only place lock in write operations since the analyzer thread
+            # only have read operations.
+            node["payload"] = adapter.get_payload()
 
-    def update_successors(self, dag, node_id, Adapter):
+    def _update_successors(self, dag, node_id, Adapter, lock=True):
         succ_ids = list(dag.successors(node_id))
         this_node_input_source_id = dag.get_input_source_node_id(node_id)
         for succ_id in succ_ids:
             payload_source_node_id = dag.get_payload_source_node_id(succ_id)
             if payload_source_node_id == node_id:
-                dag[node_id][succ_id]["pass_payload_func"](
-                    dag.nodes[node_id],
-                    dag.nodes[succ_id],
-                )
+                # pass the payload
+                with self.lock:
+                    dag[node_id][succ_id]["pass_payload_func"](
+                        dag.nodes[node_id],
+                        dag.nodes[succ_id],
+                    )
             input_source_node_id = dag.get_input_source_node_id(succ_id)
             count = 0
             if input_source_node_id == this_node_input_source_id:
                 count += 1
                 if count == 0:
-                    dag.nodes[succ_id]["buffer"]["adapter"] = dag.nodes[
-                        node_id
-                    ]["buffer"].pop("adapter")
+                    with self.lock:
+                        dag.nodes[succ_id]["buffer"]["adapter"] = dag.nodes[
+                            node_id
+                        ]["buffer"].pop("adapter")
                 else:
                     adapter = Adapter()
-                    adapter.load_inputs(
-                        dag.nodes[input_source_node_id]["inputs"]
-                    )
-                    dag.nodes[succ_id]["buffer"]["adapter"] = adapter
+                    with self.lock:
+                        adapter.load_inputs(
+                            dag.nodes[input_source_node_id]["inputs"]
+                        )
+                        dag.nodes[succ_id]["buffer"]["adapter"] = adapter
         return succ_ids
 
     def run_workflow(
@@ -65,32 +74,65 @@ class FitRunner:
         Adapter: type,
         inputs: list,
         payloads: list,
-        names=None,
         stop_before: str = None,
+        input_nodes_names: list | None = None,
     ):
+        self.thread = threading.Thread(
+            target=self._run_workflow,
+            daemon=True,
+            args=(
+                dag,
+                Adapter,
+                inputs,
+                payloads,
+                stop_before,
+                input_nodes_names,
+            ),
+        )
+        self.thread.start()
+
+    def _run_workflow(
+        self,
+        dag: FitDAG,
+        Adapter: type,
+        inputs: list,
+        payloads: list,
+        stop_before: str = None,
+        input_nodes_names: list | None = None,
+    ):
+        start_time = time.time()
         # load inputs to root nodes
-        dag.load_inputs(inputs, names)
-        # load payload and adapter to root nodes
-        for i, root_node_id in enumerate(dag.root_nodes):
-            if names:
-                index = names.index(dag.nodes[root_node_id]["name"])
-                payload = payloads[index]
-            else:
-                payload = payloads[i]
-            # init root nodes
+        with self.lock:
+            dag.load_inputs(inputs, input_nodes_names)
+        # determine the order of payloads
+        if input_nodes_names is not None:
+            root_node_names = [
+                dag.nodes[node_id]["name"] for node_id in dag.root_nodes
+            ]
+            assert set(input_nodes_names) == set(root_node_names)
+            index = [
+                root_node_names.index(input_name[i])
+                for input_name in input_nodes_names
+            ]
+        else:
+            index = list(range(len(dag.root_nodes)))
+        # load all payloads to root nodes
+        for i, node_id in enumerate(dag.root_nodes):
+            payload = payloads[index[i]]
             adapter = Adapter()
-            adapter.load_inputs(dag.nodes[root_node_id]["inputs"])
+            adapter.load_inputs(dag.nodes[node_id]["inputs"])
             adapter.apply_payload(payload)
-            root_node = dag.nodes[root_node_id]
-            # run the root node
-            root_node["buffer"]["adapter"] = adapter
-            root_node["buffer"]["payload"] = adapter.get_payload()
-        # init running variables
+            with self.lock:
+                root_node = dag.nodes[node_id]
+                # init root nodes
+                root_node["buffer"]["adapter"] = adapter
+                root_node["buffer"]["payload"] = adapter.get_payload()
+        # init the iteration parameters
         total_nodes_number = len(dag.nodes)
         finished_nodes_number = 0
-        max_iter = total_nodes_number + 1
+        max_iter = len(dag.nodes) + 1
         iter_count = 0
-        ready_node_ids = list(dag.root_nodes)
+        ready_node_ids = copy.deepcopy(dag.root_nodes)
         while ready_node_ids:
             iter_count += 1
             if iter_count > max_iter:
@@ -110,13 +152,11 @@ class FitRunner:
                     return dag
             all_succ_ids = []
             for node_id in ready_node_ids:
-                # FIXME: implement the error later
-                assert dag.hasInitialized(node_id)
-                self.run_node(
+                self._run_node(
                     dag,
                     node_id,
                 )
-                succ_ids = self.update_successors(dag, node_id, Adapter)
+                succ_ids = self._update_successors(dag, node_id, Adapter)
                 all_succ_ids.extend(succ_ids)
                 finished_nodes_number += 1
             succ_ids = list(set(all_succ_ids))
@@ -131,4 +171,7 @@ class FitRunner:
                 "Not all nodes were finished in FitDAG execution. "
                 "Possible cyclic dependency or deadlock."
             )
+        else:
+            end_time = time.time()
+            print(f"Workflow finished. Totally caused {end_time-start_time}s")
         return dag
