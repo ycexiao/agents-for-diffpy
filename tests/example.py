@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 from PDFAdapter import PDFAdapter
 from FitDAG import FitDAG
@@ -8,6 +9,7 @@ import pickle
 import networkx as nx
 import threading
 from FitAnalyzer import FitAnalyzer
+import matplotlib.pyplot as plt
 
 data_dir_path = Path().cwd() / "data" / "sequential_fit"
 files = [file for file in data_dir_path.glob("*.gr")]
@@ -35,7 +37,6 @@ payload = {
     "qdamp": 0.04,
     "qbroad": 0.02,
 }
-
 
 template_dag = FitDAG()
 template_dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
@@ -73,29 +74,21 @@ all_inputs = [
     }
     for i in range(len(files))
 ]
-all_payloads = [None for _ in range(len(files))]
-all_payloads[0] = payload
-
+all_payloads = [copy.deepcopy(payload) for _ in range(len(files))]
 lock = threading.Lock()
 runner = FitRunner(lock=lock)
 analyzer = FitAnalyzer(lock=lock)
-# analyzer.watch(
-#     dag,
-#     "all",
-#     "a",
-# )
-analyzer.track(
-    dag,
-    dag.get_node_by_name("start")[0][0],
-    dag.get_node_by_name(f"all_{len(files)-1}")[0][0],
-    "ycalc",
-    "replace",
+analyzer.watch_dag(dag, "all", "a", mode="append")
+dag = runner.load_workflow(dag, PDFAdapter, all_inputs, all_payloads)
+analyzer.watch_adapter(
+    dag.nodes[dag.root_nodes[0]]["buffer"]["adapter"], "ycalc"
 )
-runner.run_workflow(dag, PDFAdapter, all_inputs, all_payloads, lock)
-analyzer.on(dag, life_time=300)  # must after runner.run_workflow
+runner.run_workflow(dag, PDFAdapter)
+analyzer.on(dag, life_time=10)  # auto-close plots after 10s
 runner.thread.join()
 
-# print(dag.watch("all", ["a"]))
+# analyzer.on(dag, life_time=10)  # auto-close plots after 10s
+# runner.thread.join()
 # with open("example_dag.pkl", "wb") as f:
 #     pickle.dump(
 #         dag.clean_copy(

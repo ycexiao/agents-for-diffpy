@@ -16,6 +16,7 @@ import difflib
 from matplotlib import pyplot as plt
 import matplotlib as mpl
 import numpy
+from queue import Queue
 
 # xyz_par is constrained or not when symmetry condition is imposed?
 # What happended whe "P1" is given? What is the difference of setting "P1"
@@ -47,8 +48,9 @@ class PDFAdapter(BaseAdapter):
     generate_observation()
     """
 
-    def __init__(self):
+    def __init__(self, lock):
         self.ready = False
+        self.lock = lock
         # hard-coded parameter names to standardize the action interface
         self._parameter_names = [
             "qdamp",
@@ -79,6 +81,7 @@ class PDFAdapter(BaseAdapter):
                     f"U23_{i}",
                 ]
             )
+        self.snapshots = {"ycalc": Queue()}
 
     def if_ready(func):
         def wrapper(self, *args, **kwargs):
@@ -201,6 +204,11 @@ class PDFAdapter(BaseAdapter):
         recipe.fithooks[0].verbose = 0
         self._recipe = recipe
         self.ready = True
+        with self.lock:
+            self._recipe._prepare()
+            self.snapshots["ycalc"].put(
+                self._recipe.pdfcontribution._eq().copy()
+            )
 
     @if_ready
     def _apply_parameter_values(self, pv_dict):
@@ -222,6 +230,8 @@ class PDFAdapter(BaseAdapter):
         for pname, pvalue in pv_dict.items():
             self._recipe._parameters[pname].setValue(pvalue)
         self._recipe._prepare()
+        for con in self._recipe._oconstraints:
+            con.update()
 
     @if_ready
     def _get_parameter_values(self):
@@ -240,8 +250,6 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def apply_payload(self, payload):
-        if payload is None:
-            return
         py_dict = {
             pname: payload[pname]
             for pname in self._recipe._parameters
@@ -254,7 +262,6 @@ class PDFAdapter(BaseAdapter):
     @if_ready
     def get_payload(self):
         payload = self._get_parameter_values()
-        payload["ycalc"] = self._recipe.pdfcontribution._eq()
         return payload
 
     @if_ready
@@ -282,10 +289,39 @@ class PDFAdapter(BaseAdapter):
                     break
                 self._recipe.free(name)
             least_squares(
-                self._recipe.residual, self._recipe.values, x_scale="jac"
+                self._residual,
+                self._recipe.values,
+                x_scale="jac",
+                callback=self._call_back,
             )
 
         return action_func
+
+    def _residual(self, p=[]):
+        """Adapted from FitRecipe._residual to add snapshot for plotting."""
+        self._recipe._prepare()
+        for con in self._recipe._oconstraints:
+            con.update()
+        self._recipe._applyValues(p)
+        chiv = numpy.concatenate(
+            [
+                wi * ci.residual().flatten()
+                for wi, ci in zip(
+                    self._recipe._weights, self._recipe._contributions.values()
+                )
+            ]
+        )
+        # Calculate the point-average chi^2
+        w = numpy.dot(chiv, chiv) / len(chiv)
+        # Now we must append the restraints
+        penalties = [
+            numpy.sqrt(res.penalty(w)) for res in self._recipe._restraintlist
+        ]
+        chiv = numpy.concatenate([chiv, penalties])
+        return chiv
+
+    def _call_back(self, x, *args, **kwargs):
+        self.snapshots["ycalc"].put(self._recipe.pdfcontribution._eq())
 
     @if_ready
     def _residual_scalar(self):

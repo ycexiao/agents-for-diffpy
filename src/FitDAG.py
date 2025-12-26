@@ -1,7 +1,7 @@
 import networkx as nx
 import uuid
 import copy
-from collections import OrderedDict
+from collections import defaultdict
 import pickle
 import re
 
@@ -71,6 +71,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             "v": None,
             "pass_payload_func": default_pass_payload_func,
         }
+        self.running_metadata = {}
 
     def furnish_node_dict(self, node_dict):
         template_node = self.default_node
@@ -390,18 +391,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
     def clear(self):
         super().clear()
         self.all_names = []
-
-    def hasInitialized(self, node_id):
-        node = self.nodes[node_id]
-        b1 = "payload" in node["buffer"] and node["buffer"]["payload"] != {}
-        b2 = (
-            "adapter" in node["buffer"]
-            and node["buffer"]["adapter"] is not None
-        )
-        return b1 and b2
-
-    def hasCompleted(self, node_id):
-        return self.nodes[node_id]["payload"] != {}
+        self.unique_names = []
 
     def merge_dag(
         self,
@@ -420,3 +410,25 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         edge = self.furnish_edge_dict({})
         self.add_edge(parent_node_id, child_node_id, **edge)
         self._prepare_nodes_structure()
+
+    def mark(self, node_id, tag):
+        if "node_status" not in self.running_metadata:
+            self.running_metadata["node_status"] = defaultdict(list)
+        allowed_tags = ["hasPayload", "hasAdapter", "completed"]
+        # FIXME: implement the error later
+        assert tag in allowed_tags
+        self.running_metadata["node_status"][node_id].append(tag)
+
+    def is_marked_as(self, node_id, status):
+        if "node_status" not in self.running_metadata:
+            return False
+        if status == "initialized":
+            return set(["hasPayload", "hasAdapter"]) == set(
+                self.running_metadata["node_status"][node_id]
+            )
+        elif status == "completed":
+            return (
+                len(self.running_metadata["node_status"][node_id]) == 3
+                and "completed"
+                == self.running_metadata["node_status"][node_id][-1]
+            )
