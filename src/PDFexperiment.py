@@ -1,87 +1,70 @@
-from pathlib import Path
-from diffpy.structure.parsers import getParser
-from diffpy.srreal.pdfcalculator import PDFCalculator
+from itertools import chain
 import random
+import copy
+from diffpy.structure.parsers import getParser
+from diffpy.srfit.structure import struToParameterSet
+from diffpy.srfit.structure import constrainAsSpaceGroup
+from diffpy.srreal.pdfcalculator import DebyePDFCalculator, PDFCalculator
+from diffpy.srfit.fitbase.parameter import ParameterAdapter
+import warnings
 
 
 class PDFexperiment:
-    def __init__(self, structure_path):
-        self.load_inputs(structure_path)
+    def __init__(self, cfg=None):
+        if not cfg:
+            cfg = {
+                "qmax": 25,
+                "rmin": 0,
+                "rmax": 10.001,
+                "rstep": 0.05,
+            }
+        self.pdfcalculator = PDFCalculator(**cfg)
+        self.default_parameter_values = {}
+        self.structure = None
+        self.spacegroup_params = None
+        self.constraints = None
+        self.parameters = []
 
-    def load_inputs(
-        self, structure_path, qmin=0.5, qmax=25.0, rmin=0.0, rmax=20.0
-    ):
+    def load_inputs(self, structure_txt):
         stru_parser = getParser("cif")
-        structure = stru_parser.parse(Path(structure_path).read_text())
+        structure = stru_parser.parse(structure_txt)
+        stru_parset = struToParameterSet("phase", structure)
         sg = getattr(stru_parser, "spacegroup", None)
+        spacegroup = sg if sg is not None else "P1"
+        spacegroup_params = constrainAsSpaceGroup(stru_parset, spacegroup)
+        self.constraints = list(stru_parset._getConstraints().values())
         self.structure = structure
-        self.spacegroup = sg.short_name if sg else "Unknown"
-        self.pdfcalc = PDFCalculator(
-            qmin=qmin, qmax=qmax, rmin=rmin, rmax=rmax
+        parameters = []
+        parsets = ["latpars", "xyzpars", "adppars"]
+        for ps in parsets:
+            if hasattr(spacegroup_params, ps):
+                parameters.extend(list(getattr(spacegroup_params, ps)))
+        calc_pnames = ["scale", "delta1", "delta2", "qdamp", "qbroad"]
+        parameters.extend(
+            [
+                ParameterAdapter(pname, self.pdfcalculator, attr=pname)
+                for pname in calc_pnames
+            ]
         )
-        self.pname_to_perturb = {
-            "qdamp": {"rng": (0, 0.1), "magnitude": None},
-            "qbroad": {"rng": (0, 0.1), "magnitude": None},
-            "scale": {"rng": (0.5, 1.5), "magnitude": None},
-            "delta2": {"rng": (0, 0.2), "magnitude": None},
-            "delta1": {"rng": (0, 0.2), "magnitude": None},
-            "U": {"rng": None, "magnitude": (0.5, 1.5)},
-            "length": {"rng": None, "magnitude": (0.5, 1.5)},
-            "angle": {"rng": None, "magnitude": (0.5, 1.5)},
-        }
+        self.parameters = {p.name: p for p in parameters}
 
-    def get_parameter(self, pname):
-        if pname in ["qdamp", "qbroad", "scale", "delta2", "delta1"]:
-            parameter = getattr(self.pdfcalc, pname)
-        if pname in ["a", "b", "c", "alpha", "beta", "gamma"]:
-            lattice = self.structure.lattice
-            parameter = getattr(lattice, pname)
-        elif pname.startswith("U"):
-            uij_name, atom_index = pname.split("_")
-            atom_index = int(atom_index)
-            atom = self.structure[atom_index]
-            parameter = getattr(atom, uij_name)
-        elif (
-            pname.startswith("x")
-            or pname.startswith("y")
-            or pname.startswith("z")
-        ):
-            coord_name, atom_index = pname.split("_")
-            atom_index = int(atom_index)
-            atom = self.structure[atom_index]
-            parameter = getattr(atom, coord_name)
-        else:
-            raise ValueError(f"Unknown parameter name: {pname}")
-        return parameter
+    def update_consrtaints(self):
+        iter_n = len(self.constraints)
+        # No need to sort constraints if we just iterate enough times
+        for _ in range(iter_n):
+            for cons in self.constraints:
+                cons.update()
 
-    def perturb_parameter(self, pname, probability, rng, magnitude):
+    def perturb_parameter(self, pname, probability, magnitude):
         if random.random() > probability:
             return
-        param = self.get_parameter(
-            pname,
+        current_value = self.parameters[pname].value
+        current_value = 1 if current_value == 0 else current_value
+        self.parameters[pname].setValue(
+            random.random() * magnitude * current_value
         )
-        if rng is not None:
-            param.setValue(
-                random.random() * (rng[1] - rng[0]) + rng[0],
-            )
-        elif magnitude is not None:
-            param.setValue(
-                param.value
-                * (
-                    random.random() * (magnitude[1] - magnitude[0])
-                    + magnitude[0]
-                )
-            )
-
-    def perturb_parameter_default(self):
-        for pname, settings in self.pname_to_perturb.items():
-            self.perturb_parameter(
-                pname,
-                probability=0.8,
-                rng=settings["rng"],
-                magnitude=settings["magnitude"],
-            )
+        self.update_consrtaints()
 
     def generate(self):
-        r, G = self.pdfcalc(self.structure)
-        return r, G
+        r, g = self.pdfcalculator(self.structure)
+        return r, g
