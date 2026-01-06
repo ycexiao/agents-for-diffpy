@@ -14,19 +14,33 @@ class FitAnalyzer:
         self.dag_plot_artists = []
         self.adapter_plot_data = []
         self.adapter_plot_artists = []
-        self.animations = []
 
     def watch_dag(self, dag, step_name, pname, mode="append"):
-        assert step_name in dag.unique_names
+        """Watch 'pname' parameter of all nodes with 'step_name' as prefix."""
         step_names = []
         node_ids = []
-        for node_id, node_content in dag.nodes(data=True):
-            if node_content["name"].startswith(step_name):
-                step_names.append(node_content["name"])
+        if step_name is not None:
+            for node_id, node_content in dag.nodes(data=True):
+                assert step_name in dag.unique_names
+                if node_content["name"].startswith(step_name):
+                    step_names.append(node_content["name"])
+                    node_ids.append(node_id)
+                    step_names[step_names.index(step_name)] = step_name + "_0"
+                    order = [
+                        int(re.findall(r"_(\d+)$", name)[0])
+                        for name in step_names
+                    ]
+                    sorted_node_ids = [
+                        id for _, id in sorted(zip(order, node_ids))
+                    ]
+        else:
+            for node_id, node_content in dag.nodes(data=True):
                 node_ids.append(node_id)
-        step_names[step_names.index(step_name)] = step_name + "_0"
-        order = [int(re.findall(r"_(\d+)$", name)[0]) for name in step_names]
-        sorted_node_ids = [id for _, id in sorted(zip(order, node_ids))]
+                order = [dag.nodes[id]["level"] for id in node_ids]
+                sorted_node_ids = [
+                    id for _, id in sorted(zip(order, node_ids))
+                ]
+
         self.dag_plot_data.append(
             {
                 "ids": sorted_node_ids,
@@ -43,6 +57,7 @@ class FitAnalyzer:
         pname,
         mode="append",
     ):
+        """Track 'pname' parameter from 'start_id' to 'end_id'."""
         node_ids = nx.shortest_path(dag, source=start_id, target=end_id)
         self.dag_plot_data.append(
             {
@@ -57,6 +72,7 @@ class FitAnalyzer:
         adapter,
         pname,
     ):
+        """Watch 'pname' parameter of the adapter snapshots."""
         self.adapter_plot_data.append(
             {
                 "adapter": adapter,
@@ -122,9 +138,11 @@ class FitAnalyzer:
     def adapter_plot_func_factory(self, line, plot_data):
         def update(frame, line=line, plot_data=plot_data):
             pname = plot_data["pname"]
-            if plot_data["adapter"].snapshots[pname].empty():
-                return (line,)
+            # if plot_data["adapter"].snapshots[pname].empty():
+            #     return (line,)
             y = plot_data["adapter"].snapshots[pname].get()
+            if y is None:
+                plot_data["adapter"].snapshots[pname].task_done()
             ax = line.axes
             line.set_data(range(len(y)), y)
             ax.relim()
@@ -136,7 +154,6 @@ class FitAnalyzer:
 
     def on(self, dag, life_time=120):
         self._prepare_plot()
-        anis = []
         for i, plot_data in enumerate(self.dag_plot_data):
             update_func = self.dag_plot_func_factory(
                 self.dag_plot_artists[i][1], plot_data, dag
@@ -148,7 +165,6 @@ class FitAnalyzer:
                 blit=False,
                 cache_frame_data=False,
             )
-            self.animations.append(ani)
 
         for i, plot_data in enumerate(self.adapter_plot_data):
             update_func = self.adapter_plot_func_factory(
@@ -161,5 +177,4 @@ class FitAnalyzer:
                 blit=False,
                 cache_frame_data=False,
             )
-            self.animations.append(ani)
         plt.show()

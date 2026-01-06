@@ -386,7 +386,8 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         net.add_nodes(node_ids, label=node_lables)
         net.add_edges(graph.edges())
         # Save and render
-        net.write_html(filename)
+        # net.write_html(filename)
+        net.show(filename, notebook=False)
 
     def clear(self):
         super().clear()

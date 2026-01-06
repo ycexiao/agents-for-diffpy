@@ -15,7 +15,6 @@ data_dir_path = Path().cwd() / "data" / "sequential_fit"
 files = [file for file in data_dir_path.glob("*.gr")]
 order = [int(re.search(r"(\d+)K\.gr", file.name).group(1)) for file in files]
 files = [file for _, file in sorted(zip(order, files))]
-
 structure_path = Path().cwd() / "data" / "Ni.cif"
 
 # Configure the first file
@@ -46,7 +45,7 @@ dag = template_dag.clean_copy(
     instance_type="FitDAG",
 )
 
-files = files[:2]
+files = files[:1]
 for i in range(1, len(files)):
     another_dag = template_dag.clean_copy(
         with_payload=False,
@@ -62,6 +61,7 @@ for i in range(1, len(files)):
     dag.merge_dag(another_dag, parent_node_id, child_node_id)
     print(f"Merged DAG for file {i+1}")
 
+# dag.render()
 all_inputs = [
     {
         "profile_string": files[i].read_text(),
@@ -75,20 +75,22 @@ all_inputs = [
     for i in range(len(files))
 ]
 all_payloads = [copy.deepcopy(payload) for _ in range(len(files))]
-lock = threading.Lock()
-runner = FitRunner(lock=lock)
-analyzer = FitAnalyzer(lock=lock)
-analyzer.watch_dag(dag, "all", "a", mode="append")
-dag = runner.load_workflow(dag, PDFAdapter, all_inputs, all_payloads)
-analyzer.watch_adapter(
-    dag.nodes[dag.root_nodes[0]]["buffer"]["adapter"], "ycalc"
-)
-runner.run_workflow(dag, PDFAdapter)
-analyzer.on(dag, life_time=10)  # auto-close plots after 10s
-runner.thread.join()
 
-# analyzer.on(dag, life_time=10)  # auto-close plots after 10s
-# runner.thread.join()
+if __name__ == "__main__":
+    lock = threading.Lock()
+    runner = FitRunner(lock=lock)
+    analyzer = FitAnalyzer(lock=lock)
+    # analyzer.watch_dag(dag, "all", "a", mode="append")
+    analyzer.watch_dag(dag, None, "a", mode="append")
+    dag = runner.load_workflow(dag, PDFAdapter, all_inputs, all_payloads)
+    # analyzer.watch_adapter(
+    #     dag.nodes[dag.root_nodes[0]]["buffer"]["adapter"], "ycalc"
+    # )
+    dag._prepare_nodes_structure()
+    runner.run_workflow(dag, PDFAdapter)
+    analyzer.on(dag, life_time=10)  # auto-close plots after 10s
+    runner.thread.join()
+
 # with open("example_dag.pkl", "wb") as f:
 #     pickle.dump(
 #         dag.clean_copy(

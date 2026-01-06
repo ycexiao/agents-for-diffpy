@@ -48,9 +48,8 @@ class PDFAdapter(BaseAdapter):
     generate_observation()
     """
 
-    def __init__(self, lock):
+    def __init__(self):
         self.ready = False
-        self.lock = lock
         # hard-coded parameter names to standardize the action interface
         self._parameter_names = [
             "qdamp",
@@ -204,11 +203,8 @@ class PDFAdapter(BaseAdapter):
         recipe.fithooks[0].verbose = 0
         self._recipe = recipe
         self.ready = True
-        with self.lock:
-            self._recipe._prepare()
-            self.snapshots["ycalc"].put(
-                self._recipe.pdfcontribution._eq().copy()
-            )
+        self._recipe._prepare()
+        self.snapshots["ycalc"].put(self._recipe.pdfcontribution._eq().copy())
 
     @if_ready
     def _apply_parameter_values(self, pv_dict):

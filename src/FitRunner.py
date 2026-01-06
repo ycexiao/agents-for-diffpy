@@ -61,7 +61,7 @@ class FitRunner:
                             node_id
                         ]["buffer"].pop("adapter")
                 else:
-                    adapter = Adapter(self.lock)
+                    adapter = Adapter()
                     adapter.load_inputs(
                         dag.nodes[input_source_node_id]["inputs"]
                     )
@@ -112,7 +112,7 @@ class FitRunner:
         # load all payloads to root nodes
         for i, node_id in enumerate(dag.root_nodes):
             payload = payloads[index[i]]
-            adapter = Adapter(self.lock)
+            adapter = Adapter()
             adapter.load_inputs(dag.nodes[node_id]["inputs"])
             adapter.apply_payload(payload)
             with self.lock:
