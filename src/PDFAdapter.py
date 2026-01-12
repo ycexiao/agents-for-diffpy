@@ -50,7 +50,7 @@ class PDFAdapter(BaseAdapter):
 
     def __init__(self):
         self.ready = False
-        # hard-coded parameter names to standardize the action interface
+        # for sanity check.
         self._parameter_names = [
             "qdamp",
             "qbroad",
@@ -80,7 +80,7 @@ class PDFAdapter(BaseAdapter):
                     f"U23_{i}",
                 ]
             )
-        self.snapshots = {"ycalc": Queue()}
+        self.inputs = None
 
     def if_ready(func):
         def wrapper(self, *args, **kwargs):
@@ -102,6 +102,7 @@ class PDFAdapter(BaseAdapter):
         return wrong_msg
 
     def load_inputs(self, inputs):
+        self.inputs = inputs
         recipe_input_keys = [
             "structure_string",
             "profile_string",
@@ -204,7 +205,6 @@ class PDFAdapter(BaseAdapter):
         self._recipe = recipe
         self.ready = True
         self._recipe._prepare()
-        self.snapshots["ycalc"].put(self._recipe.pdfcontribution._eq().copy())
 
     @if_ready
     def _apply_parameter_values(self, pv_dict):
@@ -294,7 +294,6 @@ class PDFAdapter(BaseAdapter):
         return action_func
 
     def _residual(self, p=[]):
-        """Adapted from FitRecipe._residual to add snapshot for plotting."""
         self._recipe._prepare()
         for con in self._recipe._oconstraints:
             con.update()
@@ -317,7 +316,7 @@ class PDFAdapter(BaseAdapter):
         return chiv
 
     def _call_back(self, x, *args, **kwargs):
-        self.snapshots["ycalc"].put(self._recipe.pdfcontribution._eq())
+        pass
 
     @if_ready
     def _residual_scalar(self):
@@ -341,49 +340,11 @@ class PDFAdapter(BaseAdapter):
         rw = cumrw[-1:].sum()
         return rw
 
-    def plot(adapter):
-        # Get an array of the r-values we fitted over.
-        r = adapter._recipe.pdfcontribution.profile.x
-        # Get an array of the observed PDF.
-        g = adapter._recipe.pdfcontribution.profile.y
-        # Get an array of the calculated PDF.
-        gcalc = adapter._recipe.pdfcontribution._eq()
-        # Make an array of identical shape as g which is offset from g.
-        diffzero = -0.65 * max(g) * numpy.ones_like(g)
-        # Calculate the residual (difference) array and offset it vertically.
-        diff = g - gcalc + diffzero
-        # Change some style detials of the plot
-        mpl.rcParams.update(mpl.rcParamsDefault)
-        # Create a figure and an axis on which to plot
-        fig, ax1 = plt.subplots(1, 1)
-        # Plot the difference offset line
-        ax1.plot(r, diffzero, lw=1.0, ls="--", c="black")
-        # Plot the measured data
-        ax1.plot(
-            r,
-            g,
-            ls="None",
-            marker="o",
-            ms=5,
-            mew=0.2,
-            mfc="None",
-            label="G(r) Data",
-        )
-        # Plot the calculated data
-        ax1.plot(r, gcalc, lw=1.3, label="G(r) Fit")
-        # Plot the difference
-        ax1.plot(r, diff, lw=1.2, label="G(r) diff")
-        # Let's label the axes!
-        ax1.set_xlabel(r"r ($\mathrm{\AA}$)")
-        ax1.set_ylabel(r"G ($\mathrm{\AA}$$^{-2}$)")
-        # Tune the tick markers. We are picky!
-        ax1.tick_params(axis="both", which="major", top=True, right=True)
-        # Set the boundaries on the x-axis
-        ax1.set_xlim(r[0], r[-1])
-        # We definitely want a legend!
-        ax1.legend()
-        # Let's use a tight layout. Shun wasted space!
-        plt.tight_layout()
-        # This is going to make a figure pop up on screen for you to view.
-        # The script will pause until you close the figure!
-        plt.show()
+    def clone(self):
+        adapter = PDFAdapter()
+        adapter.load_inputs(self.inputs)
+        adapter._apply_parameter_values(self._get_parameter_values())
+        return adapter
+
+        
+
