@@ -4,13 +4,11 @@ import copy
 from collections import defaultdict
 import pickle
 import re
+from networkx.readwrite.json_graph import node_link_data
+import json
 
 
-def default_pass_payload_func(parent_node, child_node):
-    child_node["buffer"]["payload"] = parent_node["payload"]
-
-
-class FitDAG(nx.DiGraph):  # or FitForest?
+class FitDAG(nx.DiGraph):
     """
     A directed acyclic graph (DAG) representing fitting instructions.
 
@@ -43,35 +41,38 @@ class FitDAG(nx.DiGraph):  # or FitForest?
     ---------------
     description: str
         string description of the current edge
-    patch: callable
-        function to modify its sucessors' context
     """
 
     def __init__(self):
         super().__init__()
-        self.all_names = []
-        self.unique_names = []  # names without added suffixes
+        self.names = []
         self.default_node = {
             "description": "",
-            "inputs": {},
+            "id": "",
+            "name": "",
             "buffer": {},
             "payload": {},
-            "level": 100,
-            "type": "normal",  # could be "start", "normal", "end"
             "action": [],
-            "name": "",
         }
-
-        # FIXME: Edges defines the relations between nodes, e.g. how the child
-        # node's context is modified by the parent node's outcome.
-        # For now, we only define a placeholder function.
         self.default_edge = {
             "description": "",
-            "u": None,
-            "v": None,
-            "pass_payload_func": default_pass_payload_func,
+            "source": None,
+            "target": None,
         }
-        self.running_metadata = {}
+
+    @property
+    def root_nodes(self):
+        return [
+            node_id for node_id in self.nodes() if self.in_degree(node_id) == 0
+        ]
+
+    @property
+    def leaf_nodes(self):
+        return [
+            node_id
+            for node_id in self.nodes()
+            if self.out_degree(node_id) == 0
+        ]
 
     def furnish_node_dict(self, node_dict):
         template_node = self.default_node
@@ -90,19 +91,8 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             if node_dict["name"] != ""
             else ", ".join(node_dict["action"])
         )
-        if name in self.unique_names:
-            count = 1
-            new_name = f"{name}_{count}"
-            while new_name in self.all_names:
-                count += 1
-                new_name = f"{name}_{count}"
-            name = new_name
-            self.all_names.append(name)
-        else:
-            name = name
-            self.unique_names.append(name)
-            self.all_names.append(name)
         node_dict["name"] = name
+        self.names.append(name)
         return node_dict
 
     def furnish_edge_dict(self, edge_dict):
@@ -133,25 +123,28 @@ class FitDAG(nx.DiGraph):  # or FitForest?
                     {"id": "3", "name": "node3", "action": "all"},
                 ],
                 "edges": [
-                {"u": "1", "v": "2"},
-                {"u": "2", "v": "3"}
+                {"source": "1", "target": "2"},
+                {"source": "2", "target": "3"}
                 ],
             }
         """
         self.clear()
-        all_node_values = []
         for node_content in data["nodes"]:
-            node_content["action"] = [
-                v.strip() for v in node_content["action"].split(",")
-            ]
+            action = node_content["action"]
+            if isinstance(action, str):
+                node_content["action"] = [v.strip() for v in action.split(",")]
+            elif isinstance(action, list):
+                node_content["action"] = action
+            else:
+                raise TypeError(
+                    "Only str and list of str supported for desginating actions."
+                )
             node_content = self.furnish_node_dict(node_content)
             node_id = node_content.get("id", str(uuid.uuid4()))
             self.add_node(node_id, **node_content)
-            all_node_values.extend(node_content["action"])
         for edge in data["edges"]:
             edge = self.furnish_edge_dict(edge)
-            self.add_edge(edge["u"], edge["v"], **edge)
-        self._prepare_nodes_structure()
+            self.add_edge(edge.pop("source"), edge.pop("target"), **edge)
 
     def from_str(self, dag_str):
         """
@@ -180,157 +173,34 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             edge = self.furnish_edge_dict({})
             self.add_edge(parent_node_id, child_node_id, **edge)
             parent_node_id = child_node_id
-        self._prepare_nodes_structure()
-
-    def from_workflow(self, filename):
-        """
-        Load the fitting diagram from a serialized DAG file.
-
-        Parameters
-        ----------
-        filename : str
-            Path to the serialized DAG file.
-        """
-        self.clear()
-        with open(filename, "rb") as f:
-            graph = pickle.load(f)
-        for node_id, node_content in graph.nodes(data=True):
-            self.all_names.append(node_content["name"])
-            self.add_node(node_id, **node_content)
-        for u, v, edge_content in graph.edges(data=True):
-            self.add_edge(u, v, **edge_content)
-        self._prepare_nodes_structure()
 
     def get_node_by_name(self, name):
+        assert self.names.count(name) == 1
         nodes = []
         for node_id, node_content in self.nodes(data=True):
             if node_content["name"] == name:
-                nodes.append((node_id, node_content))
-        return nodes
+                return node_id, node_content
 
     def get_edge_by_name(self, u_name, v_name):
         u_node_id, _ = self.get_node_by_name(u_name)[0]
         v_node_id, _ = self.get_node_by_name(v_name)[0]
         return self[u_node_id][v_node_id]
 
-    @property
-    def root_nodes(self):
-        return [
-            node_id for node_id in self.nodes() if self.in_degree(node_id) == 0
-        ]
-
-    @property
-    def leaf_nodes(self):
-        return [
-            node_id
-            for node_id in self.nodes()
-            if self.out_degree(node_id) == 0
-        ]
-
-    def load_inputs(self, inputs, names=None):
-        root_names = [
-            self.nodes[node_id]["name"] for node_id in self.root_nodes
-        ]
-        if names:
-            for name in names:
-                # FIXME: refine the error later
-                assert name in root_names
-                index = root_names.index(name)
-                self.nodes[self.root_nodes[index]]["inputs"] = inputs[index]
-        else:
-            for i, root_node_id in enumerate(self.root_nodes):
-                self.nodes[root_node_id]["inputs"] = inputs[i]
-
-    def _prepare_nodes_structure(self):
-        self._map_to_root_node = {}
-        self.node_levels = {}
-        # Add start nodes if not exist
-        for root_node_id in self.root_nodes:
-            if self.nodes[root_node_id]["type"] != "start":
-                start_node = {
-                    "action": [],
-                    "type": "start",
-                    "name": "start",
-                    "level": 0,
-                }
-                start_node_id = str(uuid.uuid4())
-                start_node = self.furnish_node_dict(start_node)
-                self.add_node(start_node_id, **start_node)
-                edge = self.furnish_edge_dict({})
-                self.add_edge(start_node_id, root_node_id, **edge)
-
-        for root_node_id in self.root_nodes:
-            levels = nx.single_source_shortest_path_length(self, root_node_id)
-            for node_id, level in levels.items():
-                if self._map_to_root_node.get(node_id, None) is not None:
-                    # FIXME: refine the error later
-                    assert self.node_levels[node_id] != level
-                    if self.node_levels[node_id] > level:
-                        self._map_to_root_node[node_id] = root_node_id
-                        self.node_levels[node_id] = level
-                    else:
-                        continue
-                else:
-                    self._map_to_root_node[node_id] = root_node_id
-                    self.node_levels[node_id] = level
-
-        for node_id, level in self.node_levels.items():
-            self.nodes[node_id]["level"] = self.node_levels[node_id]
-
-        self.input_source_node_id_dict = {
-            id: self._map_to_root_node[id] for id in self.nodes()
-        }
-        self.payload_source_node_id_dict = {}
-        for node_id in self.nodes():
-            if node_id in self.root_nodes:
-                self.payload_source_node_id_dict[node_id] = node_id
-            else:
-                parent_ids = list(self.predecessors(node_id))
-                levels = [
-                    self.node_levels.get(parent_id, float("inf"))
-                    for parent_id in parent_ids
-                ]
-                source_parent_id = parent_ids[levels.index(max(levels))]
-                self.payload_source_node_id_dict[node_id] = source_parent_id
-
-    def get_input_source_node_id(self, node_id):
-        return self.input_source_node_id_dict[node_id]
-
-    def get_payload_source_node_id(self, node_id):
-        return self.payload_source_node_id_dict[node_id]
-
     def clean_copy(
         self,
         with_payload=False,
         with_same_id=True,
-        with_buffer=False,
-        instance_type="networkx",
     ):
-        if instance_type == "networkx":
-            graph = (
-                nx.DiGraph()
-            )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
-        elif instance_type == "FitDAG":
-            graph = FitDAG()
-            graph.all_names = copy.deepcopy(self.all_names)
-            graph.unique_names = copy.deepcopy(self.unique_names)
-        else:
-            raise ValueError(
-                f"Unsupported instance_type: {instance_type}. "
-                "Supported types are 'networkx' and 'FitDAG'."
-            )
+        graph = (
+            nx.DiGraph()
+        )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
         id_maps = {}
-        payload_filter = lambda k, v: ((k, {}) if k == "payload" else (k, v))
-        buffer_filter = lambda k, v: ((k, {}) if k == "buffer" else (k, v))
-        filer_func = lambda k, v: (k, v)
-        if not with_payload:
-            filter_func = lambda k, v: payload_filter(*filer_func(k, v))
-        if not with_buffer:
-            filter_func = lambda k, v: buffer_filter(*filer_func(k, v))
         for node_id, node_content in self.nodes(data=True):
-            node_content = dict(
-                [filter_func(k, v) for k, v in node_content.items()]
-            )
+            node_content["buffer"] = None
+            if with_payload:
+                pass
+            else:
+                node_content["payload"] = None
             if with_same_id:
                 id_maps[node_id] = node_id
             else:
@@ -340,45 +210,37 @@ class FitDAG(nx.DiGraph):  # or FitForest?
             graph.add_node(node_id, **node_content)
 
         for u, v, edge_content in self.edges(data=True):
-            edge_content = dict(
-                filter_func(k, v) for k, v in edge_content.items()
-            )
             graph.add_edge(id_maps[u], id_maps[v], **edge_content)
         return graph
 
-    def to_json(self):
-        def clean_dict(d):
-            out_dict = {}
-            for key, value in d.items():
-                if isinstance(value, dict):
-                    out_dict[key] = clean_dict(value)
-                elif (
-                    isinstance(value, str)
-                    or isinstance(value, int)
-                    or isinstance(value, float)
-                ):
-                    out_dict[key] = value
-                else:
-                    "Unserializable value found, skip it."
-            return out_dict
+    def to_json(self, filename="graph.json"):
+        graph = self.clean_copy(with_payload=True, with_same_id=True)
 
-        out_dict = {}
-        for node_id, node_content in self.nodes(data=True):
-            out_dict["id"] = node_id
-            out_dict.update(clean_dict(node_content))
-        return clean_dict(out_dict)
+        data = node_link_data(
+            graph,
+            source="source",  # edge source key
+            target="target",  # edge target key
+            name="id",  # node id key
+            edges="edges",  # what to call the edge list
+            nodes="nodes",  # what to call the node list
+        )
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def from_json(self, filename):
+        with open(filename, "r") as f:
+            graph_dict = json.load(f)
+        self.from_dict(graph_dict)
 
     def render(self, filename="graph.html"):
         from pyvis.network import Network
 
-        # Create PyVis network
         net = Network(
             directed=True,
-            notebook=False,  # IMPORTANT
-            cdn_resources="remote",  # IMPORTANT
+            notebook=False,
+            cdn_resources="remote",
         )
-
-        graph = self.clean_copy(with_payload=False, instance_type="networkx")
+        graph = self.clean_copy(with_payload=False)
         node_ids, node_lables = [], []
         for node_id, node_content in graph.nodes(data=True):
             node_ids.append(node_id)
@@ -391,26 +253,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
 
     def clear(self):
         super().clear()
-        self.all_names = []
-        self.unique_names = []
-
-    def merge_dag(
-        self,
-        child_dag,
-        parent_node_id,
-        child_node_id,
-    ):
-        for node_id, node_content in child_dag.nodes(data=True):
-            if node_id not in self.nodes():
-                node_content = self.furnish_node_dict(node_content)
-                self.add_node(node_id, **node_content)
-        for u, v, edge_content in child_dag.edges(data=True):
-            if not self.has_edge(u, v):
-                edge_content = self.furnish_edge_dict(edge_content)
-                self.add_edge(u, v, **edge_content)
-        edge = self.furnish_edge_dict({})
-        self.add_edge(parent_node_id, child_node_id, **edge)
-        self._prepare_nodes_structure()
+        self.names = []
 
     def mark(self, node_id, tag):
         if "node_status" not in self.running_metadata:
@@ -420,7 +263,7 @@ class FitDAG(nx.DiGraph):  # or FitForest?
         assert tag in allowed_tags
         self.running_metadata["node_status"][node_id].append(tag)
 
-    def is_marked_as(self, node_id, status):
+    def is_marked(self, node_id, status):
         if "node_status" not in self.running_metadata:
             return False
         if status == "initialized":
