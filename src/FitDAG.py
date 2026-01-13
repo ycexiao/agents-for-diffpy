@@ -59,6 +59,7 @@ class FitDAG(nx.DiGraph):
             "source": None,
             "target": None,
         }
+        self.running_metadata = {}
 
     @property
     def root_nodes(self):
