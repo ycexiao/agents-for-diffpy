@@ -15,6 +15,7 @@ inputs = {
     "qmin": 0.1,
 }
 
+
 def test_load_inputs():
     adapter = PDFAdapter()
     adapter.load_inputs(inputs)
@@ -32,21 +33,27 @@ def test_payloads():
         "qbroad": 0.02,
     }
     current_payload = adapter.get_payload()
-    assert current_payload == {key:current_payload[key] for key in current_payload}
+    assert current_payload == {
+        key: current_payload[key] for key in current_payload
+    }
     adapter.apply_payload(expected_payload)
     current_payload = adapter.get_payload()
-    assert current_payload == {key:current_payload[key] for key in current_payload}
+    assert current_payload == {
+        key: current_payload[key] for key in current_payload
+    }
 
 
 def test_action():
     adapter = PDFAdapter()
     adapter.load_inputs(inputs)
     expected_a = 3.522729608872
-    adapter.apply_payload({"a":3.52})  # even using 3.53 as the initial value won't stable convegence to the expected_a. This is with diffpy.srfit
-    assert not numpy.isclose(adapter.get_payload()['a'], expected_a)
-    adapter.action_func_factory('a')()
-    print(adapter.get_payload()['a'])
-    assert numpy.isclose(adapter.get_payload()['a'], expected_a)
+    adapter.apply_payload(
+        {"a": 3.52}
+    )  # even using 3.53 as the initial value won't stable convegence to the expected_a. This is with diffpy.srfit
+    assert not numpy.isclose(adapter.get_payload()["a"], expected_a)
+    adapter.action_func_factory("a")()
+    print(adapter.get_payload()["a"])
+    assert numpy.isclose(adapter.get_payload()["a"], expected_a)
 
 
 def test_clone():
@@ -54,4 +61,3 @@ def test_clone():
     adapter.load_inputs(inputs)
     new_adapter = adapter.clone()
     assert new_adapter.get_payload() == adapter.get_payload()
-    

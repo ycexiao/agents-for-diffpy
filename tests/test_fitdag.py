@@ -6,11 +6,11 @@ import json
 
 def test_from():
     def check_dag(dag):
-        actions = ['a', 'scale', 'delta2', 'Uiso', 'all']
+        actions = ["a", "scale", "delta2", "Uiso", "all"]
         assert len(dag.nodes) == len(actions)
         for node_id, node_content in dag.nodes(data=True):
-            assert len(node_content['action']) == 1
-            assert node_content['action'][0] in actions
+            assert len(node_content["action"]) == 1
+            assert node_content["action"][0] in actions
 
     dag_str = "a->scale->delta2->Uiso->all"
     dag_from_str = FitDAG()
@@ -43,4 +43,3 @@ def test_from():
     check_dag(dag_from_str)
     check_dag(dag_from_dict)
     check_dag(dag_from_json)
-

@@ -25,8 +25,7 @@ from queue import Queue
 
 
 class PDFAdapter(BaseAdapter):
-    """
-    Adapter to expose PDF fitting interface for FitRunner.
+    """Adapter to expose PDF fitting interface for FitRunner.
 
     Attributes
     ----------
@@ -81,6 +80,8 @@ class PDFAdapter(BaseAdapter):
                 ]
             )
         self.inputs = None
+        self.snapshots = {}
+        self.iteration_counts = 0
 
     def if_ready(func):
         def wrapper(self, *args, **kwargs):
@@ -127,8 +128,7 @@ class PDFAdapter(BaseAdapter):
         qmin=None,
         qmax=None,
     ):
-        """
-        Load inputs to create parameters and residuals.
+        """Load inputs to create parameters and residuals.
 
         Attributes
         ----------
@@ -208,8 +208,7 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def _apply_parameter_values(self, pv_dict):
-        """
-        Update parameter values from the provided dictionary.
+        """Update parameter values from the provided dictionary.
 
         Parameters
         ----------
@@ -231,8 +230,7 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def _get_parameter_values(self):
-        """
-        Get current parameter values as a dictionary.
+        """Get current parameter values as a dictionary.
 
         Returns
         -------
@@ -262,8 +260,7 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def action_func_factory(self, action_names):
-        """
-        Generate operations to be performed in the workflow. Use factory to
+        """Generate operations to be performed in the workflow. Use factory to
         allow more flexible action functions in the future.
 
         Attributes
@@ -288,7 +285,6 @@ class PDFAdapter(BaseAdapter):
                 self._residual,
                 self._recipe.values,
                 x_scale="jac",
-                callback=self._call_back,
             )
 
         return action_func
@@ -298,12 +294,15 @@ class PDFAdapter(BaseAdapter):
         for con in self._recipe._oconstraints:
             con.update()
         self._recipe._applyValues(p)
+
+        cons = list(self._recipe._contributions.values())
+        ycalcs = [con._eq() for con in cons]
+        ys = [con.profile.y for con in cons]
+        residuals = [con._reseq() for con in cons]
         chiv = numpy.concatenate(
             [
-                wi * ci.residual().flatten()
-                for wi, ci in zip(
-                    self._recipe._weights, self._recipe._contributions.values()
-                )
+                wi * residual.flatten()
+                for wi, residual in zip(self._recipe._weights, residuals)
             ]
         )
         # Calculate the point-average chi^2
@@ -313,38 +312,14 @@ class PDFAdapter(BaseAdapter):
             numpy.sqrt(res.penalty(w)) for res in self._recipe._restraintlist
         ]
         chiv = numpy.concatenate([chiv, penalties])
+        for i in range(len(cons)):
+            self.snapshots[f"ycalc_{i}"] = ycalcs[i]
+            self.snapshots[f"y_{i}"] = ys[i]
+            self.snapshots[f"ydiff_{i}"] = ycalcs[i] - ys[i]
         return chiv
-
-    def _call_back(self, x, *args, **kwargs):
-        pass
-
-    @if_ready
-    def _residual_scalar(self):
-        """
-        Copied from Fitresult._calculateMetrics
-        """
-        y = self._recipe.pdfcontribution.profile.y
-        ycalc = self._recipe.pdfcontribution._eq()
-        dy = self._recipe.pdfcontribution.profile.dy
-        num = numpy.abs(y - ycalc)
-        y = numpy.abs(y)
-        chiv = num / dy
-        cumchi2 = numpy.cumsum(chiv**2)
-        # avoid index error for empty array
-        yw = y / dy
-        yw2tot = numpy.dot(yw, yw)
-        if yw2tot == 0.0:
-            yw2tot = 1.0
-        cumrw = numpy.sqrt(cumchi2 / yw2tot)
-        # avoid index error for empty array
-        rw = cumrw[-1:].sum()
-        return rw
 
     def clone(self):
         adapter = PDFAdapter()
         adapter.load_inputs(self.inputs)
         adapter._apply_parameter_values(self._get_parameter_values())
         return adapter
-
-        
-

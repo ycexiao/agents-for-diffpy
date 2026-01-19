@@ -27,4 +27,13 @@ def test_runner():
     dag = FitDAG()
     dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
     runner = FitRunner()
+    runner.watch(dag, "a", "all", "a", "append", "payload")
     runner.run_workflow(dag, PDFAdapter, inputs, payload)
+    assert list(runner.data_for_plot.values())[0]["ydata"].qsize() == 6
+    data_queue = list(runner.data_for_plot.values())[0]["ydata"]
+    while not data_queue.empty():
+        print(data_queue.get())
+
+
+if __name__ == "__main__":
+    test_runner()

@@ -9,8 +9,7 @@ import json
 
 
 class FitDAG(nx.DiGraph):
-    """
-    A directed acyclic graph (DAG) representing fitting instructions.
+    """A directed acyclic graph (DAG) representing fitting instructions.
 
     Each node defines an action executed under the context of the input from
     root node and the payload from the parent node. Each action updates
@@ -45,7 +44,7 @@ class FitDAG(nx.DiGraph):
 
     def __init__(self):
         super().__init__()
-        self.names = []
+        self.name_to_id = {}
         self.default_node = {
             "description": "",
             "id": "",
@@ -93,7 +92,6 @@ class FitDAG(nx.DiGraph):
             else ", ".join(node_dict["action"])
         )
         node_dict["name"] = name
-        self.names.append(name)
         return node_dict
 
     def furnish_edge_dict(self, edge_dict):
@@ -109,8 +107,7 @@ class FitDAG(nx.DiGraph):
         return edge_dict
 
     def from_dict(self, data):
-        """
-        Initialize the fitting diagram from a dictionary representation.
+        """Initialize the fitting diagram from a dictionary representation.
 
         Parameters
         ----------
@@ -142,14 +139,14 @@ class FitDAG(nx.DiGraph):
                 )
             node_content = self.furnish_node_dict(node_content)
             node_id = node_content.get("id", str(uuid.uuid4()))
+            self.name_to_id[node_content["name"]] = node_id
             self.add_node(node_id, **node_content)
         for edge in data["edges"]:
             edge = self.furnish_edge_dict(edge)
             self.add_edge(edge.pop("source"), edge.pop("target"), **edge)
 
     def from_str(self, dag_str):
-        """
-        Parse a linear DAG from a string representation.
+        """Parse a linear DAG from a string representation.
 
         Parameters
         ----------
@@ -165,27 +162,17 @@ class FitDAG(nx.DiGraph):
         node_content = {"action": actions[0]}
         node_content = self.furnish_node_dict(node_content)
         parent_node_id = str(uuid.uuid4())
+        self.name_to_id[node_content["name"]] = parent_node_id
         self.add_node(parent_node_id, **node_content)
         for i in range(1, len(actions)):
             node_content = {"action": actions[i]}
             node_content = self.furnish_node_dict(node_content)
             child_node_id = str(uuid.uuid4())
+            self.name_to_id[node_content["name"]] = child_node_id
             self.add_node(child_node_id, **node_content)
             edge = self.furnish_edge_dict({})
             self.add_edge(parent_node_id, child_node_id, **edge)
             parent_node_id = child_node_id
-
-    def get_node_by_name(self, name):
-        assert self.names.count(name) == 1
-        nodes = []
-        for node_id, node_content in self.nodes(data=True):
-            if node_content["name"] == name:
-                return node_id, node_content
-
-    def get_edge_by_name(self, u_name, v_name):
-        u_node_id, _ = self.get_node_by_name(u_name)[0]
-        v_node_id, _ = self.get_node_by_name(v_name)[0]
-        return self[u_node_id][v_node_id]
 
     def clean_copy(
         self,
