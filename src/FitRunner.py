@@ -14,61 +14,53 @@ import networkx as nx
 import copy
 from collections import defaultdict, OrderedDict
 import queue
+from functools import partial
 
 
 class FitRunner:
     def __init__(self):
-        # window_id: {x_data:[1,2,3], y_data:[1,2,3], update_mode: 'append'|'replace',**kwargs}
         self.data_for_plot = OrderedDict({})
-        self.collect_data_realtime_event = {}
+        self.collect_data_event = OrderedDict({})
 
     def watch(
         self,
-        dag,
-        start,
-        end,
+        trigger_func,
         pname,
         update_mode,
         source="paylaod",
         title=None,
         style="sparse",
+        window_id=None,
     ):
         if not title:
             title = pname
-        window_id = str(uuid.uuid4())
-        self.data_for_plot[window_id] = {
-            "ydata": queue.Queue(),
-            "title": title,
-            "update_mode": update_mode,
-            "style": style,
-        }
-        try:
-            uuid.UUID(start)
-        except ValueError:
-            start = dag.name_to_id[start]
-        try:
-            uuid.UUID(end)
-        except ValueError:
-            end = dag.name_to_id[end]
-        node_ids = nx.shortest_path(dag, start, end)
-        for node_id in node_ids:
-            this_event = {
-                "window_id": window_id,
-                "pname": pname,
-                "source": source,
+        if not window_id:
+            window_id = str(uuid.uuid4())
+        if window_id not in self.data_for_plot:
+            self.data_for_plot[window_id] = {
+                "ydata": queue.Queue(),
+                "title": title,
+                "update_mode": update_mode,
+                "style": style,
             }
-            if node_id not in self.collect_data_realtime_event:
-                self.collect_data_realtime_event[node_id] = [this_event]
-            else:
-                self.collect_data_realtime_event[node_id].append(this_event)
+        if not self.collect_data_event:
+            self.collect_data_event = {}
+        this_event = {
+            "trigger_func": trigger_func,
+            "window_id": window_id,
+            "pname": pname,
+            "source": source,
+        }
+        self.collect_data_event[window_id] = this_event
+        return window_id
 
     def _collect_data_realtime(self, dag, node_id):
         assert dag.is_marked(node_id, "completed")  # sanity check
-        events = self.collect_data_realtime_event.get(node_id, None)
-        if not events:
+        if not self.collect_data_event:
             return
-        for this_event in events:
-            # Get ydata
+        for window_id, this_event in self.collect_data_event.items():
+            if not this_event["trigger_func"](dag, node_id):
+                continue
             pname = this_event["pname"]
             window_id = this_event["window_id"]
             if this_event["source"] == "payload":
@@ -87,7 +79,7 @@ class FitRunner:
             self.data_for_plot[window_id]["ydata"].put(ydata)
         time.sleep(0.05)  # 20 Hz
 
-    def run_node(
+    def _run_node(
         self,
         dag,
         node_id: str,
@@ -102,7 +94,7 @@ class FitRunner:
         dag.mark(node_id, "completed")
         self._collect_data_realtime(dag, node_id)
 
-    def update_successors(self, dag, node_id, Adapter):
+    def _update_successors(self, dag, node_id, Adapter):
         succ_ids = list(dag.successors(node_id))
         this_node = dag.nodes[node_id]
         adapter = this_node["buffer"].pop("adapter")
@@ -120,7 +112,7 @@ class FitRunner:
             dag.mark(succ_id, "hasAdapter")
         return succ_ids
 
-    def run_workflow(
+    def _run_dag(
         self,
         dag: FitDAG,
         Adapter: type,
@@ -133,17 +125,20 @@ class FitRunner:
         root_node = dag.nodes[root_node_id]
         adapter = Adapter()
         adapter.load_inputs(inputs)
-        root_node["buffer"]["adapter"] = adapter
-        root_node["buffer"]["payload"] = payload
+        root_node["buffer"] = {"adapter": adapter, "payload": payload}
         dag.mark(root_node_id, "hasPayload")
         dag.mark(root_node_id, "hasAdapter")
         start_time = time.time()
-        total_nodes_number = len(dag.nodes)
         finished_nodes_number = 0
+        total_nodes_number = len(dag.nodes)
         max_iter = len(dag.nodes) + 1
         iter_count = 0
         ready_node_ids = dag.root_nodes
         while ready_node_ids:
+            print(
+                f"\tFinished nodes {finished_nodes_number} / {total_nodes_number}. This iteration: "  # noqa: E501
+                f"{[dag.nodes[id]['name'] for id in ready_node_ids]}"  # noqa: E501
+            )
             if iter_count > max_iter:
                 warnings.warn(
                     "Maximum iterations reached in FitDAG execution. "
@@ -153,22 +148,58 @@ class FitRunner:
             iter_count += 1
             all_succ_ids = []
             for node_id in ready_node_ids:
-                self.run_node(
+                self._run_node(
                     dag,
                     node_id,
                 )
-                succ_ids = self.update_successors(dag, node_id, Adapter)
+                succ_ids = self._update_successors(dag, node_id, Adapter)
                 all_succ_ids.extend(succ_ids)
                 finished_nodes_number += 1
             succ_ids = list(set(all_succ_ids))
             ready_node_ids = [
                 id for id in succ_ids if dag.is_marked(id, "initialized")
             ]
-            print(
-                f"In {iter_count} iterations:\n"  # noqa: E501
-                f"\tFinished {finished_nodes_number-len(dag.root_nodes)+1} / {total_nodes_number-len(dag.root_nodes)} nodes."  # noqa: E501
-                f"\nNext nodes: {[dag.nodes[id]['name'] for id in ready_node_ids]}"  # noqa: E501
-            )
         end_time = time.time()
-        print(f"Workflow finished. Totally caused {end_time-start_time}s")
+        print(f"\tThis dag is finished. Caused {end_time-start_time}s")
         return dag
+
+    def _run_sequential_dags(
+        self, dags: list, Adapter: type, inputs: dict, payload: dict
+    ):
+        for i in range(len(dags)):
+            print(f"Processing {i+1}/{len(dags)} dags")  # noqa: E501
+            self._run_dag(
+                dags[i], Adapter=Adapter, inputs=inputs[i], payload=payload
+            )
+            last_node_id = list(nx.topological_sort(dags[i]))[-1]
+            payload = dags[i].nodes[last_node_id]["payload"]
+        return dags
+
+    def get_run_dag_func(
+        self,
+        dag: FitDAG,
+        Adapter: type,
+        inputs: dict,
+        payload: dict,
+    ):
+        kwargs = {
+            "dag": dag,
+            "Adapter": Adapter,
+            "inputs": inputs,
+            "payload": payload,
+        }
+        t = threading.Thread(target=self._run_dag, kwargs=kwargs)
+        return t
+
+    def get_run_sequential_func(
+        self, dags: list, Adapter: type, inputs: dict, payload: dict
+    ):
+
+        kwargs = {
+            "dags": dags,
+            "Adapter": Adapter,
+            "inputs": inputs,
+            "payload": payload,
+        }
+        t = threading.Thread(target=self._run_sequential_dags, kwargs=kwargs)
+        return t

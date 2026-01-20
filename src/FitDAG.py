@@ -44,7 +44,6 @@ class FitDAG(nx.DiGraph):
 
     def __init__(self):
         super().__init__()
-        self.name_to_id = {}
         self.default_node = {
             "description": "",
             "id": "",
@@ -59,6 +58,8 @@ class FitDAG(nx.DiGraph):
             "target": None,
         }
         self.running_metadata = {}
+        self.events = {}
+        self.name_to_id = {}
 
     @property
     def root_nodes(self):
@@ -73,6 +74,10 @@ class FitDAG(nx.DiGraph):
             for node_id in self.nodes()
             if self.out_degree(node_id) == 0
         ]
+
+    def _update_name_to_id(self):
+        for node_id, node_content in self.nodes(data=True):
+            self.name_to_id[node_content["name"]] = node_id
 
     def furnish_node_dict(self, node_dict):
         template_node = self.default_node
@@ -139,11 +144,11 @@ class FitDAG(nx.DiGraph):
                 )
             node_content = self.furnish_node_dict(node_content)
             node_id = node_content.get("id", str(uuid.uuid4()))
-            self.name_to_id[node_content["name"]] = node_id
             self.add_node(node_id, **node_content)
         for edge in data["edges"]:
             edge = self.furnish_edge_dict(edge)
             self.add_edge(edge.pop("source"), edge.pop("target"), **edge)
+        self._update_name_to_id()
 
     def from_str(self, dag_str):
         """Parse a linear DAG from a string representation.
@@ -162,26 +167,28 @@ class FitDAG(nx.DiGraph):
         node_content = {"action": actions[0]}
         node_content = self.furnish_node_dict(node_content)
         parent_node_id = str(uuid.uuid4())
-        self.name_to_id[node_content["name"]] = parent_node_id
         self.add_node(parent_node_id, **node_content)
         for i in range(1, len(actions)):
             node_content = {"action": actions[i]}
             node_content = self.furnish_node_dict(node_content)
             child_node_id = str(uuid.uuid4())
-            self.name_to_id[node_content["name"]] = child_node_id
             self.add_node(child_node_id, **node_content)
             edge = self.furnish_edge_dict({})
             self.add_edge(parent_node_id, child_node_id, **edge)
             parent_node_id = child_node_id
+        self._update_name_to_id()
 
     def clean_copy(
-        self,
-        with_payload=False,
-        with_same_id=True,
+        self, with_payload=False, with_same_id=True, return_type="networkx"
     ):
-        graph = (
-            nx.DiGraph()
-        )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
+        if return_type == "networkx":
+            graph = (
+                nx.DiGraph()
+            )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
+        elif return_type == "FitDAG":
+            graph = FitDAG()
+        else:
+            raise KeyError(f"Unidentified type: {return_type}")
         id_maps = {}
         for node_id, node_content in self.nodes(data=True):
             node_content["buffer"] = None
@@ -199,6 +206,10 @@ class FitDAG(nx.DiGraph):
 
         for u, v, edge_content in self.edges(data=True):
             graph.add_edge(id_maps[u], id_maps[v], **edge_content)
+
+        if return_type == "FitDAG":
+            graph._update_name_to_id()
+
         return graph
 
     def to_json(self, filename="graph.json"):

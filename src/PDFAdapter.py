@@ -316,6 +316,7 @@ class PDFAdapter(BaseAdapter):
             self.snapshots[f"ycalc_{i}"] = ycalcs[i]
             self.snapshots[f"y_{i}"] = ys[i]
             self.snapshots[f"ydiff_{i}"] = ycalcs[i] - ys[i]
+            self.snapshots[f"scalar_chi_{i}"] = w
         return chiv
 
     def clone(self):
