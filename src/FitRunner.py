@@ -3,23 +3,20 @@ from FitDAG import FitDAG
 from FitDAG import FitDAG
 import warnings
 import threading
-import PDFAdapter
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 import time
-from numpy._typing import _128Bit
-import psutil, os
-import re
 import networkx as nx
-import copy
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 import queue
-from functools import partial
 
 
 class FitRunner:
     def __init__(self):
+        # Interact with FitPlotter
+        # {window_id: {"ydata": queue.Queue(), "title": str, "update_mode": str, "style": str}}
         self.data_for_plot = OrderedDict({})
+        # Capture and store data in self.data_for_plot
+        # {window_id: {"trigger_func": lambda dag, node_id: bool, "pname": str, "source": str}}
         self.collect_data_event = OrderedDict({})
 
     def watch(
@@ -27,11 +24,12 @@ class FitRunner:
         trigger_func,
         pname,
         update_mode,
-        source="paylaod",
+        source="payload",
         title=None,
         style="sparse",
         window_id=None,
     ):
+        """Set the ploting variables. Can be called multiple times."""
         if not title:
             title = pname
         if not window_id:
@@ -47,7 +45,6 @@ class FitRunner:
             self.collect_data_event = {}
         this_event = {
             "trigger_func": trigger_func,
-            "window_id": window_id,
             "pname": pname,
             "source": source,
         }
@@ -62,7 +59,6 @@ class FitRunner:
             if not this_event["trigger_func"](dag, node_id):
                 continue
             pname = this_event["pname"]
-            window_id = this_event["window_id"]
             if this_event["source"] == "payload":
                 ydata = dag.nodes[node_id]["payload"].get(pname, None)
             elif this_event["source"] == "adapter":
@@ -84,6 +80,7 @@ class FitRunner:
         dag,
         node_id: str,
     ):
+        """Run a single node in the DAG."""
         # A fail-safe check
         assert dag.is_marked(node_id, "initialized")
         node = dag.nodes[node_id]
@@ -95,6 +92,7 @@ class FitRunner:
         self._collect_data_realtime(dag, node_id)
 
     def _update_successors(self, dag, node_id, Adapter):
+        """Update the sucessors for the current node"""
         succ_ids = list(dag.successors(node_id))
         this_node = dag.nodes[node_id]
         adapter = this_node["buffer"].pop("adapter")
@@ -119,7 +117,6 @@ class FitRunner:
         inputs: dict,
         payload: dict,
     ):
-        "Run workflow containing only one set of inputs."
         assert len(dag.root_nodes) == 1
         root_node_id = dag.root_nodes[0]
         root_node = dag.nodes[root_node_id]
@@ -175,7 +172,7 @@ class FitRunner:
             payload = dags[i].nodes[last_node_id]["payload"]
         return dags
 
-    def get_run_dag_func(
+    def get_run_dag_thread(
         self,
         dag: FitDAG,
         Adapter: type,
@@ -191,7 +188,7 @@ class FitRunner:
         t = threading.Thread(target=self._run_dag, kwargs=kwargs)
         return t
 
-    def get_run_sequential_func(
+    def get_run_sequential_thread(
         self, dags: list, Adapter: type, inputs: dict, payload: dict
     ):
 

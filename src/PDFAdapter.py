@@ -80,6 +80,7 @@ class PDFAdapter(BaseAdapter):
                 ]
             )
         self.inputs = None
+        # Used to contain intermediate results during fitting
         self.snapshots = {}
         self.iteration_counts = 0
 
@@ -244,14 +245,12 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def apply_payload(self, payload):
-        py_dict = {
+        pv_dict = {
             pname: payload[pname]
             for pname in self._recipe._parameters
             if pname in payload
         }
-        if self._get_parameter_values() == py_dict:
-            return
-        self._apply_parameter_values(py_dict)
+        self._apply_parameter_values(pv_dict)
 
     @if_ready
     def get_payload(self):
@@ -305,13 +304,12 @@ class PDFAdapter(BaseAdapter):
                 for wi, residual in zip(self._recipe._weights, residuals)
             ]
         )
-        # Calculate the point-average chi^2
         w = numpy.dot(chiv, chiv) / len(chiv)
-        # Now we must append the restraints
         penalties = [
             numpy.sqrt(res.penalty(w)) for res in self._recipe._restraintlist
         ]
         chiv = numpy.concatenate([chiv, penalties])
+        # Store the current snapshots.
         for i in range(len(cons)):
             self.snapshots[f"ycalc_{i}"] = ycalcs[i]
             self.snapshots[f"y_{i}"] = ys[i]
@@ -320,6 +318,7 @@ class PDFAdapter(BaseAdapter):
         return chiv
 
     def clone(self):
+        """Create a copy of the current PDFAdapter with the same inputs and parameter values."""
         adapter = PDFAdapter()
         adapter.load_inputs(self.inputs)
         adapter._apply_parameter_values(self._get_parameter_values())

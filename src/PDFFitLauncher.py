@@ -24,32 +24,33 @@ class PDFFitLauncher:
         self.runner = FitRunner()
         self.plotter = FitPlotter()
 
+    def _check_for_new_profiles(self, pattern="(\d+)K\.gr"):
+        if not self.profile_folder:
+            raise ValueError("Profile folder is not set.")
+        if not self.structure_file:
+            raise ValueError("Structure file is not set.")
+        files = [file for file in self.profile_folder.glob("*.gr")]
+        order = [int(re.findall(pattern, file.name)[0]) for file in files]
+        files = [file for _, file in sorted(zip(order, files))]
+        if self.profiles_known != files[: len(self.profiles_known)]:
+            raise ValueError(
+                "Profiles order has changed. "
+                "Please ensure newer profiles are strictly have higher indices."
+            )
+        self.profiles_known = files
+        self.profiles_running = [
+            file
+            for file in self.profiles_known
+            if file not in self.profiles_finished
+        ]
+
     def _launch(self):
         while True:
             time.sleep(0.05)
-            if not self.profile_folder:
-                raise ValueError("Profile folder is not set.")
-            if not self.structure_file:
-                raise ValueError("Structure file is not set.")
-            files = [file for file in self.profile_folder.glob("*.gr")]
-            order = [
-                int(re.findall(r"(\d+)K\.gr", file.name)[-1]) for file in files
-            ]
-            files = [file for _, file in sorted(zip(order, files))]
-            if self.profiles_known != files[: len(self.profiles_known)]:
-                raise ValueError(
-                    "Profiles order has changed. "
-                    "Please ensure newer profiles are strictly have higher indices."
-                )
-            self.profiles_known = files
-            self.profiles_running = [
-                file
-                for file in self.profiles_known
-                if file not in self.profiles_finished
-            ]
+            self._check_for_new_profiles()
             if not self.profiles_running:
                 continue
-            for i, profile in enumerate(self.profiles_running):
+            for profile in self.profiles_running:
                 if self.last_payload is not None:
                     payload = self.last_payload
                 else:
@@ -88,14 +89,13 @@ class PDFFitLauncher:
         initial_payload: dict,
         dump_folder: Path,
         dump_filename: str,
+        template_dag: FitDAG,
     ):
         self.profile_folder = profile_folder
         self.structure_file = structure_file
         self.initial_payload = initial_payload
         self.dump_folder = dump_folder
         self.dump_filename = dump_filename
-
-    def set_template_dag(self, template_dag: FitDAG):
         self.template_dag = template_dag
 
     def watch_stable(self, pname, node_name="all", **kwargs):
@@ -146,6 +146,8 @@ class PDFFitLauncher:
 
 if __name__ == "__main__":
     launcher = PDFFitLauncher()
+    template_dag = FitDAG()
+    template_dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
     launcher.set_meta_inputs(
         profile_folder=Path("example/data/sequential_fit"),
         structure_file=Path("data/Ni.cif"),
@@ -159,10 +161,8 @@ if __name__ == "__main__":
         },
         dump_folder=Path("example/data/results"),
         dump_filename="fit_results",
+        template_dag=template_dag,
     )
-    template_dag = FitDAG()
-    template_dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
-    launcher.set_template_dag(template_dag)
     launcher.watch_stable("a", node_name="all")
     launcher.watch_intermediate("ycalc_0", update_mode="replace")
     launcher.launch()
