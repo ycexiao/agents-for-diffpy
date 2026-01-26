@@ -228,7 +228,7 @@ class FitDAG(nx.DiGraph):
             nodes="nodes",
         )
         with open(filename, "w") as f:
-            json.dump(data, f, indent=4)
+            json.dump(data, f, indent=2)
 
     def from_json(self, filename):
         with open(filename, "r") as f:

@@ -1,10 +1,10 @@
 import uuid
-from FitDAG import FitDAG
 import warnings
 import threading
 import time
 from collections import OrderedDict, defaultdict
 import queue
+from agents_for_diffpy.interface import FitDAG
 
 
 class FitRunner:

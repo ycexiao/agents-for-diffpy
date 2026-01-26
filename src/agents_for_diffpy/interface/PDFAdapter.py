@@ -8,12 +8,11 @@ from diffpy.srfit.fitbase import (
 )
 from diffpy.srfit.pdf import PDFGenerator
 import numpy
-from BaseAdapter import BaseAdapter
 from scipy.optimize import least_squares
 import difflib
 
 
-class PDFAdapter(BaseAdapter):
+class PDFAdapter:
     """Adapter to expose PDF fitting interface for FitRunner.
 
     Attributes

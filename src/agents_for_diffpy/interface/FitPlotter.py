@@ -1,7 +1,7 @@
-from FitRunner import FitRunner
 from PyQt5 import QtWidgets, QtCore
 import pyqtgraph as pg
 import sys
+from agents_for_diffpy.interface import FitRunner
 
 
 class FitPlotter:

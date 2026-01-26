@@ -1,6 +1,6 @@
-from PDFAdapter import PDFAdapter
 from pathlib import Path
 from unittest import TestCase
+from agents_for_diffpy.interface import PDFAdapter
 
 
 class TestPDFAdapter(TestCase):

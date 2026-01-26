@@ -1,10 +1,8 @@
 import sys
 from pathlib import Path
-from FitRunner import FitRunner
-from PDFAdapter import PDFAdapter
-from FitDAG import FitDAG
 import unittest
 from scipy.optimize import least_squares
+from agents_for_diffpy.interface import FitDAG, FitRunner, PDFAdapter
 
 sys.path.append(str(Path(__file__).parent / "diffpycmi_scripts.py"))
 from diffpycmi_scripts import make_recipe  # noqa: E402

@@ -1,8 +1,8 @@
 import unittest
-from FitDAG import FitDAG
 import tempfile
 from pathlib import Path
 import networkx as nx
+from agents_for_diffpy.interface import FitDAG
 
 
 class TestFitDAG(unittest.TestCase):
