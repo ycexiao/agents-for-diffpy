@@ -2,3 +2,4 @@ numpy
 scipy
 networkx
 pyqtgraph
+diffpy.cmi
