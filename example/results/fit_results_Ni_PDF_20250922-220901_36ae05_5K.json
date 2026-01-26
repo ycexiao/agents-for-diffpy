@@ -1,0 +1,136 @@
+{
+    "directed": true,
+    "multigraph": false,
+    "graph": {},
+    "nodes": [
+        {
+            "description": "",
+            "id": "e9a869f3-0589-4b63-aa8f-e4b9d79d11f5",
+            "name": "a",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.04,
+                "qbroad": 0.02,
+                "scale": 0.4,
+                "delta2": 2.0,
+                "a": 3.515588101063231,
+                "Uiso_0": 0.005
+            },
+            "action": [
+                "a"
+            ]
+        },
+        {
+            "description": "",
+            "id": "7c6aa4a1-2212-46b7-b713-5caa5e58fae2",
+            "name": "scale",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.04,
+                "qbroad": 0.02,
+                "scale": 0.4406261213442473,
+                "delta2": 2.0,
+                "a": 3.51559692354627,
+                "Uiso_0": 0.005
+            },
+            "action": [
+                "scale"
+            ]
+        },
+        {
+            "description": "",
+            "id": "9672a298-9313-4111-9392-2c6994174268",
+            "name": "qdamp",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.027880093394618433,
+                "qbroad": 0.02,
+                "scale": 0.386279089161011,
+                "delta2": 2.0,
+                "a": 3.5155458241057427,
+                "Uiso_0": 0.005
+            },
+            "action": [
+                "qdamp"
+            ]
+        },
+        {
+            "description": "",
+            "id": "9ef1f5c4-0e2b-4fab-9eec-f5e549ec85bf",
+            "name": "Uiso_0",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.029525533136512617,
+                "qbroad": 0.02,
+                "scale": 0.2620199856737507,
+                "delta2": 2.0,
+                "a": 3.5158028231117022,
+                "Uiso_0": 0.0016832609281751607
+            },
+            "action": [
+                "Uiso_0"
+            ]
+        },
+        {
+            "description": "",
+            "id": "5a920ee6-b2cb-44f3-b3e3-ff6eecc7ea8b",
+            "name": "delta2",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.029578476859311274,
+                "qbroad": 0.02,
+                "scale": 0.2623484955563303,
+                "delta2": 1.7677379442170946,
+                "a": 3.515802887967366,
+                "Uiso_0": 0.001681098423993222
+            },
+            "action": [
+                "delta2"
+            ]
+        },
+        {
+            "description": "",
+            "id": "45dcaa75-2c67-4daf-a045-6bbba538c292",
+            "name": "all",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.028133037225323638,
+                "qbroad": 0.024874593369802793,
+                "scale": 0.2570349984228292,
+                "delta2": 1.4399463188373725,
+                "a": 3.515791845558078,
+                "Uiso_0": 0.001549827147936857
+            },
+            "action": [
+                "all"
+            ]
+        }
+    ],
+    "edges": [
+        {
+            "description": "",
+            "source": "e9a869f3-0589-4b63-aa8f-e4b9d79d11f5",
+            "target": "7c6aa4a1-2212-46b7-b713-5caa5e58fae2"
+        },
+        {
+            "description": "",
+            "source": "7c6aa4a1-2212-46b7-b713-5caa5e58fae2",
+            "target": "9672a298-9313-4111-9392-2c6994174268"
+        },
+        {
+            "description": "",
+            "source": "9672a298-9313-4111-9392-2c6994174268",
+            "target": "9ef1f5c4-0e2b-4fab-9eec-f5e549ec85bf"
+        },
+        {
+            "description": "",
+            "source": "9ef1f5c4-0e2b-4fab-9eec-f5e549ec85bf",
+            "target": "5a920ee6-b2cb-44f3-b3e3-ff6eecc7ea8b"
+        },
+        {
+            "description": "",
+            "source": "5a920ee6-b2cb-44f3-b3e3-ff6eecc7ea8b",
+            "target": "45dcaa75-2c67-4daf-a045-6bbba538c292"
+        }
+    ]
+}

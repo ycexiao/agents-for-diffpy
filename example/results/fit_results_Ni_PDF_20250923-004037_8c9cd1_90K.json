@@ -1,0 +1,136 @@
+{
+    "directed": true,
+    "multigraph": false,
+    "graph": {},
+    "nodes": [
+        {
+            "description": "",
+            "id": "f13b0b4a-b067-4bf9-b50b-96a3548ad6c3",
+            "name": "a",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.027953811940694538,
+                "qbroad": 0.023319506002340527,
+                "scale": 0.26048530263194064,
+                "delta2": 1.9102715823524437,
+                "a": 3.517092407800653,
+                "Uiso_0": 0.0018703759045319139
+            },
+            "action": [
+                "a"
+            ]
+        },
+        {
+            "description": "",
+            "id": "98e8519b-e366-42df-8237-4bd1a9b9ea3a",
+            "name": "scale",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.027953811940694538,
+                "qbroad": 0.023319506002340527,
+                "scale": 0.2588992609771744,
+                "delta2": 1.9102715823524437,
+                "a": 3.517092298869039,
+                "Uiso_0": 0.0018703759045319139
+            },
+            "action": [
+                "scale"
+            ]
+        },
+        {
+            "description": "",
+            "id": "db206258-0421-409a-bcaa-ab3b25d1a1ee",
+            "name": "qdamp",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.027910415860793847,
+                "qbroad": 0.023319506002340527,
+                "scale": 0.25875869117276584,
+                "delta2": 1.9102715823524437,
+                "a": 3.517092214156534,
+                "Uiso_0": 0.0018703759045319139
+            },
+            "action": [
+                "qdamp"
+            ]
+        },
+        {
+            "description": "",
+            "id": "f27bda1a-8afd-4348-84ba-099318407f90",
+            "name": "Uiso_0",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.02787395567649676,
+                "qbroad": 0.023319506002340527,
+                "scale": 0.26072268744899246,
+                "delta2": 1.9102715823524437,
+                "a": 3.5170899868275503,
+                "Uiso_0": 0.0019069815966572712
+            },
+            "action": [
+                "Uiso_0"
+            ]
+        },
+        {
+            "description": "",
+            "id": "4c51bc4b-fc43-4eb3-81a9-95469619c4d4",
+            "name": "delta2",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.0278666017935641,
+                "qbroad": 0.023319506002340527,
+                "scale": 0.2606796756600663,
+                "delta2": 1.9383177180584321,
+                "a": 3.5170899701190903,
+                "Uiso_0": 0.0019072795206157148
+            },
+            "action": [
+                "delta2"
+            ]
+        },
+        {
+            "description": "",
+            "id": "85e2c923-fb6c-40da-b464-597f676dbe6d",
+            "name": "all",
+            "buffer": null,
+            "payload": {
+                "qdamp": 0.027934091906088622,
+                "qbroad": 0.023117171371171304,
+                "scale": 0.2609249743068286,
+                "delta2": 1.9511929098342145,
+                "a": 3.5170903744198863,
+                "Uiso_0": 0.0019138485386759468
+            },
+            "action": [
+                "all"
+            ]
+        }
+    ],
+    "edges": [
+        {
+            "description": "",
+            "source": "f13b0b4a-b067-4bf9-b50b-96a3548ad6c3",
+            "target": "98e8519b-e366-42df-8237-4bd1a9b9ea3a"
+        },
+        {
+            "description": "",
+            "source": "98e8519b-e366-42df-8237-4bd1a9b9ea3a",
+            "target": "db206258-0421-409a-bcaa-ab3b25d1a1ee"
+        },
+        {
+            "description": "",
+            "source": "db206258-0421-409a-bcaa-ab3b25d1a1ee",
+            "target": "f27bda1a-8afd-4348-84ba-099318407f90"
+        },
+        {
+            "description": "",
+            "source": "f27bda1a-8afd-4348-84ba-099318407f90",
+            "target": "4c51bc4b-fc43-4eb3-81a9-95469619c4d4"
+        },
+        {
+            "description": "",
+            "source": "4c51bc4b-fc43-4eb3-81a9-95469619c4d4",
+            "target": "85e2c923-fb6c-40da-b464-597f676dbe6d"
+        }
+    ]
+}

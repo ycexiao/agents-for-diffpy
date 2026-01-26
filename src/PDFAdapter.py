@@ -8,7 +8,6 @@ from diffpy.srfit.fitbase import (
     Profile,
 )
 from diffpy.srfit.pdf import PDFGenerator
-from pathlib import Path
 import numpy
 from BaseAdapter import BaseAdapter
 from scipy.optimize import least_squares
@@ -16,11 +15,7 @@ import difflib
 from matplotlib import pyplot as plt
 import matplotlib as mpl
 import numpy
-from queue import Queue
 
-# xyz_par is constrained or not when symmetry condition is imposed?
-# What happended whe "P1" is given? What is the difference of setting "P1"
-#   and not setting spacegroup at all?
 # setQmax and setQmin for PDFGenerator?
 
 
@@ -49,7 +44,7 @@ class PDFAdapter(BaseAdapter):
 
     def __init__(self):
         self.ready = False
-        # for sanity check.
+        # support max 64 atoms
         self._parameter_names = [
             "qdamp",
             "qbroad",
@@ -80,9 +75,8 @@ class PDFAdapter(BaseAdapter):
                 ]
             )
         self.inputs = None
-        # Used to contain intermediate results during fitting
+        # Used to store intermediate results
         self.snapshots = {}
-        self.iteration_counts = 0
 
     def if_ready(func):
         def wrapper(self, *args, **kwargs):
@@ -118,6 +112,9 @@ class PDFAdapter(BaseAdapter):
             k: inputs[k] for k in recipe_input_keys if k in inputs
         }
         self._make_recipe(**recipe_inputs)
+        if "remove_vars" in inputs:
+            for var_name in inputs["remove_vars"]:
+                self.delVar(var_name)
 
     def _make_recipe(
         self,
@@ -150,14 +147,16 @@ class PDFAdapter(BaseAdapter):
         xmin = xmin if xmin is not None else numpy.min(profile._xobs)
         xmax = xmax if xmax is not None else numpy.max(profile._xobs)
         dx = dx if dx is not None else numpy.mean(numpy.diff(profile._xobs))
-        qmin = qmin if qmin is not None else 0.5
-        qmax = qmax if qmax is not None else 25
-        pdfgenerator = PDFGenerator()
-        pdfgenerator.setStructure(structure)
         contribution = FitContribution("pdfcontribution")
         profile.setCalculationRange(xmin=xmin, xmax=xmax, dx=dx)
         contribution.setProfile(profile)
+        pdfgenerator = PDFGenerator("pdfgenerator")
         contribution.addProfileGenerator(pdfgenerator)
+        pdfgenerator.setStructure(structure)
+        if qmax is not None:
+            pdfgenerator.setQmax(qmax)
+        if qmin is not None:
+            pdfgenerator.setQmin(qmin)
         recipe = FitRecipe()
         recipe.addContribution(contribution)
         RUN_PARALLEL = True
@@ -191,7 +190,6 @@ class PDFAdapter(BaseAdapter):
             recipe.addVar(par, name=pname, fixed=False)
         stru_parset = pdfgenerator.phase
         spacegroupparams = constrainAsSpaceGroup(stru_parset, spacegroup)
-        # FIXME: only support max 64 atoms. Refine the error messge later.
         for par in spacegroupparams.xyzpars:
             recipe.addVar(par, name=par.name, fixed=False)
             assert par.name in self._parameter_names
@@ -208,6 +206,24 @@ class PDFAdapter(BaseAdapter):
         self._recipe._prepare()
 
     @if_ready
+    def delVar(self, var_name):
+        """Delete a variable from the recipe.
+
+        Variables are created automatically when the recipe is initialized. All
+        variables will be refined by default. Use this method to remove a
+        variable from the recipe if it should not be refined.
+
+        Parameters
+        ----------
+        var_name : str
+            The name of the variable to delete.
+        """
+        if var_name in self._recipe._parameters:
+            self._recipe.delVar(self._recipe._parameters[var_name])
+        else:
+            raise KeyError(f"Variable '{var_name}' not found in the recipe.")
+
+    @if_ready
     def _apply_parameter_values(self, pv_dict):
         """Update parameter values from the provided dictionary.
 
@@ -215,6 +231,7 @@ class PDFAdapter(BaseAdapter):
         ----------
         pv_dict : dict
             Dictionary mapping parameter names to their desired values.
+            Unknown parameter names will raise a KeyError.
         """
         if pv_dict == {} or pv_dict is None:
             return
@@ -245,6 +262,17 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def apply_payload(self, payload):
+        """Apply a payload to the PDFAdapter.
+
+        Payload is information cargo that will be updated at the end of each
+        node and be passed to the child nodes (See FitDAG). A minimum example
+        of it could be all the variables. Unknown keys will be ignored.
+
+        Parameters
+        ----------
+        payload : dict
+            Unknown parameter names will be ignored.
+        """
         pv_dict = {
             pname: payload[pname]
             for pname in self._recipe._parameters
@@ -259,14 +287,12 @@ class PDFAdapter(BaseAdapter):
 
     @if_ready
     def action_func_factory(self, action_names):
-        """Generate operations to be performed in the workflow. Use factory to
-        allow more flexible action functions in the future.
+        """Generate operations to be performed in the FitRunner.
 
         Attributes
         ----------
         action_names: list of str
-            The action_names appear in the DAG. This function maps the action
-            names into the action function.
+            The instruction strings appeared at each node in FitDAG.
         """
 
         def action_func():
@@ -284,41 +310,64 @@ class PDFAdapter(BaseAdapter):
                 self._residual,
                 self._recipe.values,
                 x_scale="jac",
+                method="trf",
             )
 
         return action_func
 
     def _residual(self, p=[]):
+        """
+        Residual function adapter from FitRecipe in order to capture
+        the intermediate results, the snapshots, during the iterations.
+        """
+        # Prepare, if necessary
         self._recipe._prepare()
-        for con in self._recipe._oconstraints:
-            con.update()
+
+        for fithook in self._recipe.fithooks:
+            fithook.precall(self._recipe)
+
+        # Update the variable parameters.
         self._recipe._applyValues(p)
 
-        cons = list(self._recipe._contributions.values())
-        ycalcs = [con._eq() for con in cons]
-        ys = [con.profile.y for con in cons]
-        residuals = [con._reseq() for con in cons]
+        # Update the constraints. These are ordered such that the list only
+        # needs to be cycled once.
+        for con in self._recipe._oconstraints:
+            con.update()
+
+        contributions = list(self._recipe._contributions.values())
+        contribution_residuals = [
+            ci.residual().flatten() for ci in contributions
+        ]
         chiv = numpy.concatenate(
             [
-                wi * residual.flatten()
-                for wi, residual in zip(self._recipe._weights, residuals)
+                wi * residual
+                for wi, residual in zip(
+                    self._recipe._weights, contribution_residuals
+                )
             ]
         )
+        # Calculate the point-average chi^2
         w = numpy.dot(chiv, chiv) / len(chiv)
+        # Now we must append the restraints
         penalties = [
             numpy.sqrt(res.penalty(w)) for res in self._recipe._restraintlist
         ]
         chiv = numpy.concatenate([chiv, penalties])
+
+        for fithook in self._recipe.fithooks:
+            fithook.postcall(self._recipe, chiv)
+        ycalcs = [con._eq() for con in contributions]
+        ys = [con.profile.y for con in contributions]
         # Store the current snapshots.
-        for i in range(len(cons)):
+        for i in range(len(contributions)):
             self.snapshots[f"ycalc_{i}"] = ycalcs[i]
             self.snapshots[f"y_{i}"] = ys[i]
             self.snapshots[f"ydiff_{i}"] = ycalcs[i] - ys[i]
-            self.snapshots[f"scalar_chi_{i}"] = w
         return chiv
 
     def clone(self):
-        """Create a copy of the current PDFAdapter with the same inputs and parameter values."""
+        """Create a copy of the current PDFAdapter with the same inputs
+        and parameter values."""
         adapter = PDFAdapter()
         adapter.load_inputs(self.inputs)
         adapter._apply_parameter_values(self._get_parameter_values())

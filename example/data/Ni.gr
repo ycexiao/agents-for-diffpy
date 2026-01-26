@@ -3,7 +3,7 @@
 wavelength = 0.1836
 dataformat = Qnm
 inputfile = Ni.chi
-backgroundfile = 
+backgroundfile =
 mode = xray
 bgscale = 1.0
 composition = Ni

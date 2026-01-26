@@ -17,20 +17,23 @@ class PDFFitLauncher:
         self.initial_payload = None
         self.template_dag = None
         self.last_payload = None
-        self.collect_data_event = {}
+        self.filename_pattern = None
         self.profiles_known = []
         self.profiles_finished = []
         self.profiles_running = []
         self.runner = FitRunner()
         self.plotter = FitPlotter()
 
-    def _check_for_new_profiles(self, pattern="(\d+)K\.gr"):
+    def _check_for_new_profiles(self):
         if not self.profile_folder:
             raise ValueError("Profile folder is not set.")
         if not self.structure_file:
             raise ValueError("Structure file is not set.")
-        files = [file for file in self.profile_folder.glob("*.gr")]
-        order = [int(re.findall(pattern, file.name)[0]) for file in files]
+        files = [file for file in self.profile_folder.glob("*")]
+        order = [
+            int(re.findall(self.filename_pattern, file.name)[0])
+            for file in files
+        ]
         files = [file for _, file in sorted(zip(order, files))]
         if self.profiles_known != files[: len(self.profiles_known)]:
             raise ValueError(
@@ -58,13 +61,9 @@ class PDFFitLauncher:
                 inputs = {
                     "profile_string": profile.read_text(),
                     "structure_string": self.structure_file.read_text(),
-                    "xmin": 1.5,
-                    "xmax": 50,
-                    "dx": 0.01,
-                    "qmax": 25.0,
-                    "qmin": 0.1,
+                    **self.inputs_kwargs,
                 }
-                dag = self.template_dag.clean_copy(
+                dag = self.template_dag.copy(
                     with_payload=False,
                     with_same_id=False,
                     return_type="FitDAG",
@@ -90,6 +89,13 @@ class PDFFitLauncher:
         dump_folder: Path,
         dump_filename: str,
         template_dag: FitDAG,
+        xmin,
+        xmax,
+        dx,
+        qmin,
+        qmax,
+        remove_vars,
+        filename_pattern: str = "(\d+)K\.gr",
     ):
         self.profile_folder = profile_folder
         self.structure_file = structure_file
@@ -97,43 +103,67 @@ class PDFFitLauncher:
         self.dump_folder = dump_folder
         self.dump_filename = dump_filename
         self.template_dag = template_dag
-
-    def watch_stable(self, pname, node_name="all", **kwargs):
-        """View the partial results realtime"""
-        window_id = str(uuid.uuid4())
-        default_options = {
-            "update_mode": "append",
-            "source": "payload",
-            "title": pname,
-            "style": "sparse",
-            "window_id": window_id,
+        self.filename_pattern = filename_pattern
+        self.inputs_kwargs = {
+            "xmin": xmin,
+            "xmax": xmax,
+            "dx": dx,
+            "qmin": qmin,
+            "qmax": qmax,
+            "remove_vars": remove_vars,
         }
-        default_options.update(kwargs)
-        self.runner.watch(
-            trigger_func=lambda dag, node_id: dag.nodes[node_id]["name"]
-            == node_name,
-            pname=pname,
-            **default_options,
-        )
 
-    def watch_intermediate(self, pname, **kwargs):
-        """View the intermediate results realtime.
-        The intermediate results are usually only for the diagnostic purposes
-        of the fitting process.
+    def watch(self, pname, when, **kwargs):
+        """
+        Moniter the results generated during the fit process.
+
+        Parameters
+        ----------
+        pname : str
+            The name of the plot to monitor.
+        when : {"node end", "dag end", "all"}
+            Specifies when to update the plot.
+            "node end" updates the plot at the end of each node,
+            "dag end" updates the plot at the end of each DAG, and
+            "all" updates the plot during every iteration in the least-squares.
+
+            By default, when in "node end" and "dag end" mode,
+            `source` is set to "payload", `update_mode` is set to "append", and
+            when in "all" mode, `source` is set to "adapter", `update_mode` is
+            set to "replace". Please see FitRunner.watch for more details.
+
+        **kwargs : dict
+            Additional keyword arguments for the plot.
         """
         window_id = str(uuid.uuid4())
-        default_options = {
-            "update_mode": "append",
-            "source": "adapter",
-            "title": pname,
-            "style": "dense",
-            "window_id": window_id,
-        }
-        default_options.update(kwargs)
+        if when == "node end":
+            trigger_func = lambda dag, node_id: True
+            source = "payload"
+            update_mode = "append"
+        elif when == "dag end":
+            trigger_func = (
+                lambda dag, node_id: node_id
+                == list(nx.topological_sort(dag))[-1]
+            )
+            source = "payload"
+            update_mode = "append"
+        elif when == "all":
+            trigger_func = lambda dag, node_id: True
+            source = "adapter"
+            update_mode = "replace"
+        else:
+            raise ValueError(
+                f"Invalid value for 'when': {when} "
+                "Please choose one of {'node end', 'dag end', 'all'}."
+            )
+        if "source" not in kwargs:
+            kwargs["source"] = source
+        if "update_mode" not in kwargs:
+            kwargs["update_mode"] = update_mode
         self.runner.watch(
-            trigger_func=lambda dag, node_id: True,
+            trigger_func=trigger_func,
             pname=pname,
-            **default_options,
+            **kwargs,
         )
 
     def launch(self):
@@ -150,7 +180,7 @@ if __name__ == "__main__":
     template_dag.from_str("a->scale->qdamp->Uiso_0->delta2->all")
     launcher.set_meta_inputs(
         profile_folder=Path("example/data/sequential_fit"),
-        structure_file=Path("data/Ni.cif"),
+        structure_file=Path("example/data/Ni.cif"),
         initial_payload={
             "scale": 0.4,
             "a": 3.52,
@@ -159,10 +189,17 @@ if __name__ == "__main__":
             "qdamp": 0.04,
             "qbroad": 0.02,
         },
-        dump_folder=Path("example/data/results"),
+        dump_folder=Path("example/results"),
         dump_filename="fit_results",
         template_dag=template_dag,
+        filename_pattern="(\d+)K\.gr",
+        xmin=1.5,
+        xmax=50,
+        dx=0.01,
+        qmax=25.0,
+        qmin=0.1,
+        remove_vars=["delta1"],
     )
-    launcher.watch_stable("a", node_name="all")
-    launcher.watch_intermediate("ycalc_0", update_mode="replace")
+    launcher.watch("a", when="dag end")
+    launcher.watch("ycalc_0", when="all", update_mode="replace")
     launcher.launch()

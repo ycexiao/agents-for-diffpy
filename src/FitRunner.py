@@ -6,7 +6,7 @@ import threading
 import matplotlib.pyplot as plt
 import time
 import networkx as nx
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import queue
 
 
@@ -18,6 +18,8 @@ class FitRunner:
         # Capture and store data in self.data_for_plot
         # {window_id: {"trigger_func": lambda dag, node_id: bool, "pname": str, "source": str}}
         self.collect_data_event = OrderedDict({})
+        # Temporary storage for running information
+        self.running_info = {}
 
     def watch(
         self,
@@ -29,7 +31,57 @@ class FitRunner:
         style="sparse",
         window_id=None,
     ):
-        """Set the ploting variables. Can be called multiple times."""
+        """Set the ploting variables.
+
+        FitRunner decomposes "How to moniter the results" into three parts:
+        (1) when to collect the data
+        (2) what data to collect
+        (3) where to store the collected data
+
+        (1) the `trigger_func` will be executed at the end of
+        each node. It takes (dag, node_id) as input and returns a boolean
+        indicating whether the data should be collected.
+        (2) the `pname` and `source` specify what data to collect.
+        `source` could be either "payload" or "adapter".
+        If "payload", the data will be collected from the node's payload.
+        If "adapter", the data will be collected from the adapter's snapshots.
+        `pname` is the key of the payload/snapshots from which to collect
+        the data.
+        (3) FitRunner keeps an internal dictionary `data_for_plot` to store
+        the collected data. The key for the dictionary is the `window_id`.
+        If not provided, a new UUID will be generated and used as the window
+        ID. This way, the production and consumption of the data can be
+        decoupled.
+
+        Parameters
+        ----------
+        trigger_func : callable
+            The function that takes (dag, node_id) and returns True
+            if the data should be collected.
+        pname : str
+            The name of the parameter to collect.
+        update_mode : str
+            The mode of updating the plot, e.g., "append" or "replace".
+            If it is "append", the new data will be appended to the existing
+            data in the plot.
+            If it is "replace", the new data will replace the existing data
+            in the plot.
+        source : str, optional
+            The source of the data, either "payload" or "adapter".
+            Default is "payload".
+        title : str, optional
+            The title of the plot. Default is the parameter name.
+        style : str, optional
+            The style of the plot. Default is "sparse".
+        window_id : str, optional
+            The ID of the plot window. If not provided,
+            a new UUID will be generated.
+
+        Returns
+        -------
+        str
+            The window ID for the plot.
+        """
         if not title:
             title = pname
         if not window_id:
@@ -52,7 +104,7 @@ class FitRunner:
         return window_id
 
     def _collect_data_realtime(self, dag, node_id):
-        assert dag.is_marked(node_id, "completed")  # sanity check
+        assert self.is_marked(node_id, "completed")  # sanity check
         if not self.collect_data_event:
             return
         for window_id, this_event in self.collect_data_event.items():
@@ -82,13 +134,13 @@ class FitRunner:
     ):
         """Run a single node in the DAG."""
         # A fail-safe check
-        assert dag.is_marked(node_id, "initialized")
+        assert self.is_marked(node_id, "initialized")
         node = dag.nodes[node_id]
         adapter = node["buffer"]["adapter"]
         adapter.apply_payload(node["buffer"]["payload"])
         adapter.action_func_factory(node["action"])()
         node["payload"] = adapter.get_payload()
-        dag.mark(node_id, "completed")
+        self.mark(node_id, "completed")
         self._collect_data_realtime(dag, node_id)
 
     def _update_successors(self, dag, node_id, Adapter):
@@ -101,13 +153,13 @@ class FitRunner:
             succ_node = dag.nodes[succ_id]
             # pass the payload
             succ_node["buffer"] = {"payload": this_node["payload"]}
-            dag.mark(succ_id, "hasPayload")
+            self.mark(succ_id, "hasPayload")
             if count == 0:
                 succ_node["buffer"]["adapter"] = adapter
             else:
                 succ_node["buffer"]["adapter"] = adapter.clone()
             count += 1
-            dag.mark(succ_id, "hasAdapter")
+            self.mark(succ_id, "hasAdapter")
         return succ_ids
 
     def _run_dag(
@@ -117,14 +169,15 @@ class FitRunner:
         inputs: dict,
         payload: dict,
     ):
+        self.running_info = {}
         assert len(dag.root_nodes) == 1
         root_node_id = dag.root_nodes[0]
         root_node = dag.nodes[root_node_id]
         adapter = Adapter()
         adapter.load_inputs(inputs)
         root_node["buffer"] = {"adapter": adapter, "payload": payload}
-        dag.mark(root_node_id, "hasPayload")
-        dag.mark(root_node_id, "hasAdapter")
+        self.mark(root_node_id, "hasPayload")
+        self.mark(root_node_id, "hasAdapter")
         start_time = time.time()
         finished_nodes_number = 0
         total_nodes_number = len(dag.nodes)
@@ -154,23 +207,11 @@ class FitRunner:
                 finished_nodes_number += 1
             succ_ids = list(set(all_succ_ids))
             ready_node_ids = [
-                id for id in succ_ids if dag.is_marked(id, "initialized")
+                id for id in succ_ids if self.is_marked(id, "initialized")
             ]
         end_time = time.time()
         print(f"\tThis dag is finished. Caused {end_time-start_time}s")
         return dag
-
-    def _run_sequential_dags(
-        self, dags: list, Adapter: type, inputs: dict, payload: dict
-    ):
-        for i in range(len(dags)):
-            print(f"Processing {i+1}/{len(dags)} dags")  # noqa: E501
-            self._run_dag(
-                dags[i], Adapter=Adapter, inputs=inputs[i], payload=payload
-            )
-            last_node_id = list(nx.topological_sort(dags[i]))[-1]
-            payload = dags[i].nodes[last_node_id]["payload"]
-        return dags
 
     def get_run_dag_thread(
         self,
@@ -188,15 +229,26 @@ class FitRunner:
         t = threading.Thread(target=self._run_dag, kwargs=kwargs)
         return t
 
-    def get_run_sequential_thread(
-        self, dags: list, Adapter: type, inputs: dict, payload: dict
-    ):
+    def mark(self, node_id, tag):
+        """Mark the running status of a node. Used by FitRunner."""
+        if "node_status" not in self.running_info:
+            self.running_info["node_status"] = defaultdict(list)
+        allowed_tags = ["hasPayload", "hasAdapter", "completed"]
+        # FIXME: implement the error later
+        assert tag in allowed_tags
+        self.running_info["node_status"][node_id].append(tag)
 
-        kwargs = {
-            "dags": dags,
-            "Adapter": Adapter,
-            "inputs": inputs,
-            "payload": payload,
-        }
-        t = threading.Thread(target=self._run_sequential_dags, kwargs=kwargs)
-        return t
+    def is_marked(self, node_id, status):
+        """Check the running status of a node. Used by FitRunner."""
+        if "node_status" not in self.running_info:
+            return False
+        if status == "initialized":
+            return set(["hasPayload", "hasAdapter"]) == set(
+                self.running_info["node_status"][node_id]
+            )
+        elif status == "completed":
+            return (
+                len(self.running_info["node_status"][node_id]) == 3
+                and "completed"
+                == self.running_info["node_status"][node_id][-1]
+            )

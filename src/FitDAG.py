@@ -13,8 +13,8 @@ class FitDAG(nx.DiGraph):
 
     Each dag corresponds to a single fitting task. A task that can been
     completed using only one instance of the corresponding adapter. In case
-    of PDFAdapter which uses diffpy.srfit as the backend, a task is what can be
-    completed using a single instance of the FitRecipe.
+    of PDFAdapter which uses diffpy.srfit as the backend, a task is what can
+    be completed using a single instance of the FitRecipe.
 
     DAG is only for data container purpose. The fit instructions is contained
     in "actions" and the final fit results in each step is contained in
@@ -28,7 +28,7 @@ class FitDAG(nx.DiGraph):
         The string description of the current node
     action: list
         The list of operations being executed in the current node. It will be
-        used by the corrent adatper to generate the action to be executed.
+        used by the adapter to generate the action to be executed.
     payload: list
         Mostly the parameter values after the fitting at the current step
         is completed. Usually the payload from the parent node will be used
@@ -61,7 +61,6 @@ class FitDAG(nx.DiGraph):
         # Metadata for the current running state of the DAG.
         # Used by FitRunner.
         # Can be ignored if the DAG is only used as a static data container.
-        self.running_metadata = {}
         self.name_to_id = {}
 
     @property
@@ -83,7 +82,8 @@ class FitDAG(nx.DiGraph):
             self.name_to_id[node_content["name"]] = node_id
 
     def furnish_node_dict(self, node_dict):
-        """Make the arbitrary node dictionary conform to the default node template."""
+        """Make the arbitrary node dictionary conform to the default node
+        template."""
         template_node = self.default_node
         node_dict = {
             key: (
@@ -93,8 +93,6 @@ class FitDAG(nx.DiGraph):
             )
             for key in template_node.keys()
         }
-        # FIXME: refine the error later
-        assert "action" in node_dict
         name = (
             node_dict["name"]
             if node_dict["name"] != ""
@@ -104,7 +102,8 @@ class FitDAG(nx.DiGraph):
         return node_dict
 
     def furnish_edge_dict(self, edge_dict):
-        """Make the arbitrary edge dictionary conform to the default edge template."""
+        """Make the arbitrary edge dictionary conform to the default edge
+        template."""
         template_edge = self.default_edge
         edge_dict = {
             key: (
@@ -135,6 +134,11 @@ class FitDAG(nx.DiGraph):
                 {"source": "2", "target": "3"}
                 ],
             }
+            action field can also be a list, or string with comma-separated
+            values.
+            e.g.:
+            {"id": "1", "name": "node1", "action": ["scale", "alpha"]}
+            {"id": "2", "name": "node2", "action": "scale, alpha"}
         """
         self.clear()
         for node_content in data["nodes"]:
@@ -145,7 +149,8 @@ class FitDAG(nx.DiGraph):
                 node_content["action"] = action
             else:
                 raise TypeError(
-                    "Only str and list of str supported for desginating actions."
+                    "Only str and list of str are supported for desginating "
+                    "actions."
                 )
             node_content = self.furnish_node_dict(node_content)
             node_id = node_content.get("id", str(uuid.uuid4()))
@@ -163,6 +168,8 @@ class FitDAG(nx.DiGraph):
         diag_str : str
             String representation of the fitting diagram.
             E.g. "scale->alpha->a->qdamp->all"
+            Each field can also be comma-separated values.
+            E.g. "scale,alpha->a->qdamp->all"
         """
         self.clear()
         actions = [
@@ -183,7 +190,7 @@ class FitDAG(nx.DiGraph):
             parent_node_id = child_node_id
         self._update_name_to_id()
 
-    def clean_copy(
+    def copy(
         self, with_payload=False, with_same_id=True, return_type="networkx"
     ):
         """Create a clean copy of the DAG."""
@@ -198,17 +205,15 @@ class FitDAG(nx.DiGraph):
         id_maps = {}
         for node_id, node_content in self.nodes(data=True):
             node_content["buffer"] = None
-            if with_payload:
-                pass
-            else:
+            if not with_payload:
                 node_content["payload"] = None
-            if with_same_id:
-                id_maps[node_id] = node_id
-            else:
+            if not with_same_id:
                 new_node_id = str(uuid.uuid4())
-                id_maps[node_id] = new_node_id
-                node_id = new_node_id
-            graph.add_node(node_id, **node_content)
+                the_node_id = new_node_id
+            else:
+                the_node_id = node_id
+            id_maps[node_id] = the_node_id
+            graph.add_node(the_node_id, **node_content)
 
         for u, v, edge_content in self.edges(data=True):
             graph.add_edge(id_maps[u], id_maps[v], **edge_content)
@@ -219,14 +224,14 @@ class FitDAG(nx.DiGraph):
         return graph
 
     def to_json(self, filename="graph.json"):
-        graph = self.clean_copy(with_payload=True, with_same_id=True)
+        graph = self.copy(with_payload=True, with_same_id=True)
         data = node_link_data(
             graph,
-            source="source",  # edge source key
-            target="target",  # edge target key
-            name="id",  # node id key
-            edges="edges",  # what to call the edge list
-            nodes="nodes",  # what to call the node list
+            source="source",
+            target="target",
+            name="id",
+            edges="edges",
+            nodes="nodes",
         )
         with open(filename, "w") as f:
             json.dump(data, f, indent=4)
@@ -245,7 +250,7 @@ class FitDAG(nx.DiGraph):
             notebook=False,
             cdn_resources="remote",
         )
-        graph = self.clean_copy(with_payload=False)
+        graph = self.copy(with_payload=False)
         node_ids, node_lables = [], []
         for node_id, node_content in graph.nodes(data=True):
             node_ids.append(node_id)
@@ -258,28 +263,4 @@ class FitDAG(nx.DiGraph):
 
     def clear(self):
         super().clear()
-        self.names = []
-
-    def mark(self, node_id, tag):
-        """Mark the running status of a node. Used by FitRunner."""
-        if "node_status" not in self.running_metadata:
-            self.running_metadata["node_status"] = defaultdict(list)
-        allowed_tags = ["hasPayload", "hasAdapter", "completed"]
-        # FIXME: implement the error later
-        assert tag in allowed_tags
-        self.running_metadata["node_status"][node_id].append(tag)
-
-    def is_marked(self, node_id, status):
-        """Check the running status of a node. Used by FitRunner."""
-        if "node_status" not in self.running_metadata:
-            return False
-        if status == "initialized":
-            return set(["hasPayload", "hasAdapter"]) == set(
-                self.running_metadata["node_status"][node_id]
-            )
-        elif status == "completed":
-            return (
-                len(self.running_metadata["node_status"][node_id]) == 3
-                and "completed"
-                == self.running_metadata["node_status"][node_id][-1]
-            )
+        self.name_to_id = {}

@@ -1,10 +1,9 @@
-"""
-Please see notes in Chapter 3 of the 'PDF to the People' book for additonal
+"""Please see notes in Chapter 3 of the 'PDF to the People' book for additonal
 explanation of the code.
 
-This Diffpy-CMI script will carry out a structural refinement of a measured
-PDF from nickel.  It is the same refinement as is done using PDFgui in this
-chapter of the book, only this time using Diffpy-CMI
+This Diffpy-CMI script will carry out a structural refinement of a
+measured PDF from nickel.  It is the same refinement as is done using
+PDFgui in this chapter of the book, only this time using Diffpy-CMI
 """
 
 # 1: Import relevant system packages that we will need...
@@ -30,14 +29,14 @@ import time
 # First we store the absolute directory of this script, then two directories above this,
 # with the directory 'data' appended
 PWD = Path().parent.absolute()
-DPATH = PWD / "data"
+DPATH = PWD / "example" / "data"
 
 # 3: Give an identifying name for the refinement, similar
 # to what you would name a fit tree in PDFGui.
 FIT_ID = "Fit_Ni_Bulk"
 
 # 4: Specify the names of the input PDF and CIF file.
-GR_NAME = "Ni.gr"
+GR_NAME = "Ni_PDF_20250923-004037_8c9cd1_90K.gr"
 CIF_NAME = "Ni.cif"
 
 ######## Experimental PDF Config ######################
@@ -73,8 +72,7 @@ RUN_PARALLEL = True
 # This Fit Recipe object contains the PDF data, information on all the structure(s)
 # we will use to fit, and all relevant details necessary to run the fit.
 def make_recipe(cif_path, dat_path):
-    """
-    Creates and returns a Fit Recipe object
+    """Creates and returns a Fit Recipe object.
 
     Parameters
     ----------
@@ -222,9 +220,8 @@ def make_recipe(cif_path, dat_path):
 # 21: We create a useful function 'plot_results' for writing a plot of the fit to disk.
 # We won't go into detail here as much of this is non-CMI specific
 def plot_results(recipe, fig_name):
-    """
-    Creates plots of the fitted PDF and residual, and writes them to disk
-    as *.pdf files.
+    """Creates plots of the fitted PDF and residual, and writes them to disk as
+    *.pdf files.
 
     Parameters
     ----------
@@ -317,9 +314,8 @@ def plot_results(recipe, fig_name):
 # 22: By Convention, this main function is where we do most of our work, and it
 # is the bit of code which will be run when we issue 'python file.py' from a terminal.
 def main():
-    """
-    This will run by default when the file is executed using
-    'python file.py' in the command line.
+    """This will run by default when the file is executed using 'python
+    file.py' in the command line.
 
     Parameters
     ----------
@@ -341,12 +337,15 @@ def main():
             folder.mkdir()
 
     # Establish the location of the data and a name for our fit.
-    gr_path = DPATH / GR_NAME
+    gr_path = DPATH / "sequential_fit" / GR_NAME
     basename = FIT_ID
     print(basename)
 
     # Establish the full path of the CIF file with the structure of interest.
     stru_path = DPATH / CIF_NAME
+
+    print(gr_path)
+    print(stru_path)
 
     # 23: Now we call our 'make_recipe' function created above, giving
     # strings which points to the relevant CIF file and PDF data file.
@@ -355,7 +354,7 @@ def main():
     # Tell the Fit Recipe we want to write the maximum amount of
     # information to the terminal during fitting.
     # Passing '2' or '1' prints intermediate info, while '0' prints no info.
-    recipe.fithooks[0].verbose = 3
+    recipe.fithooks[0].verbose = 0
 
     # 24: During the optimization, fix and free parameters sequentially
     # as you would PDFgui. This leads to more stability in the refinement.
@@ -371,11 +370,16 @@ def main():
     # and provides for a bit more stability.
     recipe.fix("all")
     tags = ["lat", "scale", "adp", "d2", "all"]
+    # tags = ["lat", "scale"]
     strat_time = time.time()
+
     for tag in tags:
         recipe.free(tag)
         least_squares(recipe.residual, recipe.values, x_scale="jac")
     end_time = time.time()
+
+    for pname, parameter in recipe._parameters.items():
+        print(f"{pname}: {parameter.value}")
 
     # 25: We use the 'savetxt' method of the profile to write a text file
     # containing the measured and fitted PDF to disk.
