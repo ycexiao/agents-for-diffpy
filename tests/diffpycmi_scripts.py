@@ -377,6 +377,9 @@ def main():
         recipe.free(tag)
         least_squares(recipe.residual, recipe.values, x_scale="jac")
     end_time = time.time()
+    for tag in tags:
+        recipe.free(tag)
+        least_squares(recipe.residual, recipe.values, x_scale="jac")
 
     for pname, parameter in recipe._parameters.items():
         print(f"{pname}: {parameter.value}")
