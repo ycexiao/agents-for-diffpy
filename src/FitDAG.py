@@ -1,9 +1,5 @@
 import networkx as nx
 import uuid
-import copy
-from collections import defaultdict
-import pickle
-import re
 from networkx.readwrite.json_graph import node_link_data
 import json
 
@@ -195,9 +191,7 @@ class FitDAG(nx.DiGraph):
     ):
         """Create a clean copy of the DAG."""
         if return_type == "networkx":
-            graph = (
-                nx.DiGraph()
-            )  # use nx.DiGraph so copies can be serialized with minimal compatible issues
+            graph = nx.DiGraph()
         elif return_type == "FitDAG":
             graph = FitDAG()
         else:
@@ -242,7 +236,7 @@ class FitDAG(nx.DiGraph):
         self.from_dict(graph_dict)
 
     def render(self, filename="graph.html"):
-        """Show the DAG structure"""
+        """Show the DAG structure."""
         from pyvis.network import Network
 
         net = Network(

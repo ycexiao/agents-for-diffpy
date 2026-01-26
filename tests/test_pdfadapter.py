@@ -1,6 +1,5 @@
 from PDFAdapter import PDFAdapter
 from pathlib import Path
-import numpy
 from unittest import TestCase
 
 

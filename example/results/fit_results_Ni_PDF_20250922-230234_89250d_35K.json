@@ -1,136 +1,124 @@
 {
-    "directed": true,
-    "multigraph": false,
-    "graph": {},
-    "nodes": [
-        {
-            "description": "",
-            "id": "b881f894-d725-4d47-ac51-4b7910a9a9e3",
-            "name": "a",
-            "buffer": null,
-            "payload": {
-                "qdamp": 0.028133037225323638,
-                "qbroad": 0.024874593369802793,
-                "scale": 0.2570349984228292,
-                "delta2": 1.4399463188373725,
-                "a": 3.5162415809473226,
-                "Uiso_0": 0.001549827147936857
-            },
-            "action": [
-                "a"
-            ]
-        },
-        {
-            "description": "",
-            "id": "89e0b384-0a4c-4393-b9fe-1184202589aa",
-            "name": "scale",
-            "buffer": null,
-            "payload": {
-                "qdamp": 0.028133037225323638,
-                "qbroad": 0.024874593369802793,
-                "scale": 0.2555478315628738,
-                "delta2": 1.4399463188373725,
-                "a": 3.516241579752943,
-                "Uiso_0": 0.001549827147936857
-            },
-            "action": [
-                "scale"
-            ]
-        },
-        {
-            "description": "",
-            "id": "bb0edd00-f738-4010-a610-66b01448e2d8",
-            "name": "qdamp",
-            "buffer": null,
-            "payload": {
-                "qdamp": 0.02812332034282124,
-                "qbroad": 0.024874593369802793,
-                "scale": 0.2555168076352059,
-                "delta2": 1.4399463188373725,
-                "a": 3.5162415578170387,
-                "Uiso_0": 0.001549827147936857
-            },
-            "action": [
-                "qdamp"
-            ]
-        },
-        {
-            "description": "",
-            "id": "307de293-47a2-4406-bc83-409d7f514c87",
-            "name": "Uiso_0",
-            "buffer": null,
-            "payload": {
-                "qdamp": 0.028078722451755012,
-                "qbroad": 0.024874593369802793,
-                "scale": 0.2573481079442707,
-                "delta2": 1.4399463188373725,
-                "a": 3.5162393837215062,
-                "Uiso_0": 0.0015813413841380675
-            },
-            "action": [
-                "Uiso_0"
-            ]
-        },
-        {
-            "description": "",
-            "id": "72ae6d74-e7e1-4e2f-b78b-30152a3e9091",
-            "name": "delta2",
-            "buffer": null,
-            "payload": {
-                "qdamp": 0.02806013908749663,
-                "qbroad": 0.024874593369802793,
-                "scale": 0.2572435415941666,
-                "delta2": 1.5229013480753208,
-                "a": 3.5162393437048474,
-                "Uiso_0": 0.0015820471890689177
-            },
-            "action": [
-                "delta2"
-            ]
-        },
-        {
-            "description": "",
-            "id": "3ecba202-5b65-476e-bdd1-bb29fdfb2449",
-            "name": "all",
-            "buffer": null,
-            "payload": {
-                "qdamp": 0.028099882845036936,
-                "qbroad": 0.02474451045747954,
-                "scale": 0.25739169892493136,
-                "delta2": 1.532895221625729,
-                "a": 3.5162396054106453,
-                "Uiso_0": 0.0015857664927445925
-            },
-            "action": [
-                "all"
-            ]
-        }
-    ],
-    "edges": [
-        {
-            "description": "",
-            "source": "b881f894-d725-4d47-ac51-4b7910a9a9e3",
-            "target": "89e0b384-0a4c-4393-b9fe-1184202589aa"
-        },
-        {
-            "description": "",
-            "source": "89e0b384-0a4c-4393-b9fe-1184202589aa",
-            "target": "bb0edd00-f738-4010-a610-66b01448e2d8"
-        },
-        {
-            "description": "",
-            "source": "bb0edd00-f738-4010-a610-66b01448e2d8",
-            "target": "307de293-47a2-4406-bc83-409d7f514c87"
-        },
-        {
-            "description": "",
-            "source": "307de293-47a2-4406-bc83-409d7f514c87",
-            "target": "72ae6d74-e7e1-4e2f-b78b-30152a3e9091"
-        },
-        {
-            "description": "",
-            "source": "72ae6d74-e7e1-4e2f-b78b-30152a3e9091",
-            "target": "3ecba202-5b65-476e-bdd1-bb29fdfb2449"
-        }
-    ]
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "description": "",
+      "id": "01ad8d34-606c-4742-938a-76dd1976b5d5",
+      "name": "a",
+      "buffer": null,
+      "payload": {
+        "qdamp": 0.028133037225323638,
+        "qbroad": 0.024874593369802793,
+        "scale": 0.2570349984228292,
+        "delta2": 1.4399463188373725,
+        "a": 3.5162415809473226,
+        "Uiso_0": 0.001549827147936857
+      },
+      "action": ["a"]
+    },
+    {
+      "description": "",
+      "id": "7ae0b6e7-5087-408b-a9a6-9c311e7218d2",
+      "name": "scale",
+      "buffer": null,
+      "payload": {
+        "qdamp": 0.028133037225323638,
+        "qbroad": 0.024874593369802793,
+        "scale": 0.2555478315628738,
+        "delta2": 1.4399463188373725,
+        "a": 3.516241579752943,
+        "Uiso_0": 0.001549827147936857
+      },
+      "action": ["scale"]
+    },
+    {
+      "description": "",
+      "id": "d215998d-b785-4d7e-b636-c95a99c8954b",
+      "name": "qdamp",
+      "buffer": null,
+      "payload": {
+        "qdamp": 0.02812332034282124,
+        "qbroad": 0.024874593369802793,
+        "scale": 0.2555168076352059,
+        "delta2": 1.4399463188373725,
+        "a": 3.5162415578170387,
+        "Uiso_0": 0.001549827147936857
+      },
+      "action": ["qdamp"]
+    },
+    {
+      "description": "",
+      "id": "73917173-891f-40aa-9b9a-70900ca46da1",
+      "name": "Uiso_0",
+      "buffer": null,
+      "payload": {
+        "qdamp": 0.028078722451755012,
+        "qbroad": 0.024874593369802793,
+        "scale": 0.2573481079442707,
+        "delta2": 1.4399463188373725,
+        "a": 3.5162393837215062,
+        "Uiso_0": 0.0015813413841380675
+      },
+      "action": ["Uiso_0"]
+    },
+    {
+      "description": "",
+      "id": "64d377fd-db61-48e5-b5e6-82e170022366",
+      "name": "delta2",
+      "buffer": null,
+      "payload": {
+        "qdamp": 0.02806013908749663,
+        "qbroad": 0.024874593369802793,
+        "scale": 0.2572435415941666,
+        "delta2": 1.5229013480753208,
+        "a": 3.5162393437048474,
+        "Uiso_0": 0.0015820471890689177
+      },
+      "action": ["delta2"]
+    },
+    {
+      "description": "",
+      "id": "4bcbf5a6-dabb-49e1-a145-42a5aa7c64fb",
+      "name": "all",
+      "buffer": null,
+      "payload": {
+        "qdamp": 0.028099882845036936,
+        "qbroad": 0.02474451045747954,
+        "scale": 0.25739169892493136,
+        "delta2": 1.532895221625729,
+        "a": 3.5162396054106453,
+        "Uiso_0": 0.0015857664927445925
+      },
+      "action": ["all"]
+    }
+  ],
+  "edges": [
+    {
+      "description": "",
+      "source": "01ad8d34-606c-4742-938a-76dd1976b5d5",
+      "target": "7ae0b6e7-5087-408b-a9a6-9c311e7218d2"
+    },
+    {
+      "description": "",
+      "source": "7ae0b6e7-5087-408b-a9a6-9c311e7218d2",
+      "target": "d215998d-b785-4d7e-b636-c95a99c8954b"
+    },
+    {
+      "description": "",
+      "source": "d215998d-b785-4d7e-b636-c95a99c8954b",
+      "target": "73917173-891f-40aa-9b9a-70900ca46da1"
+    },
+    {
+      "description": "",
+      "source": "73917173-891f-40aa-9b9a-70900ca46da1",
+      "target": "64d377fd-db61-48e5-b5e6-82e170022366"
+    },
+    {
+      "description": "",
+      "source": "64d377fd-db61-48e5-b5e6-82e170022366",
+      "target": "4bcbf5a6-dabb-49e1-a145-42a5aa7c64fb"
+    }
+  ]
 }

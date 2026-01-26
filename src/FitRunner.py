@@ -1,11 +1,8 @@
 import uuid
 from FitDAG import FitDAG
-from FitDAG import FitDAG
 import warnings
 import threading
-import matplotlib.pyplot as plt
 import time
-import networkx as nx
 from collections import OrderedDict, defaultdict
 import queue
 
@@ -13,10 +10,17 @@ import queue
 class FitRunner:
     def __init__(self):
         # Interact with FitPlotter
-        # {window_id: {"ydata": queue.Queue(), "title": str, "update_mode": str, "style": str}}
+        # {window_id: {
+        #   "ydata": queue.Queue(),
+        #   "title": str,
+        #   "update_mode": str,
+        #    "style": str}}
         self.data_for_plot = OrderedDict({})
         # Capture and store data in self.data_for_plot
-        # {window_id: {"trigger_func": lambda dag, node_id: bool, "pname": str, "source": str}}
+        # {window_id: {
+        #   "trigger_func": lambda dag, node_id: bool,
+        #   "pname": str,
+        #   "source": str}}
         self.collect_data_event = OrderedDict({})
         # Temporary storage for running information
         self.running_info = {}
@@ -144,7 +148,7 @@ class FitRunner:
         self._collect_data_realtime(dag, node_id)
 
     def _update_successors(self, dag, node_id, Adapter):
-        """Update the sucessors for the current node"""
+        """Update the sucessors for the current node."""
         succ_ids = list(dag.successors(node_id))
         this_node = dag.nodes[node_id]
         adapter = this_node["buffer"].pop("adapter")
@@ -230,7 +234,10 @@ class FitRunner:
         return t
 
     def mark(self, node_id, tag):
-        """Mark the running status of a node. Used by FitRunner."""
+        """Mark the running status of a node.
+
+        Used by FitRunner.
+        """
         if "node_status" not in self.running_info:
             self.running_info["node_status"] = defaultdict(list)
         allowed_tags = ["hasPayload", "hasAdapter", "completed"]
@@ -239,7 +246,10 @@ class FitRunner:
         self.running_info["node_status"][node_id].append(tag)
 
     def is_marked(self, node_id, status):
-        """Check the running status of a node. Used by FitRunner."""
+        """Check the running status of a node.
+
+        Used by FitRunner.
+        """
         if "node_status" not in self.running_info:
             return False
         if status == "initialized":

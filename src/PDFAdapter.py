@@ -1,5 +1,4 @@
 from diffpy.srfit.pdf import PDFParser
-from diffpy.srfit.fitbase import Profile
 from diffpy.srfit.structure import constrainAsSpaceGroup
 from diffpy.structure.parsers import getParser
 from diffpy.srfit.fitbase import (
@@ -12,11 +11,6 @@ import numpy
 from BaseAdapter import BaseAdapter
 from scipy.optimize import least_squares
 import difflib
-from matplotlib import pyplot as plt
-import matplotlib as mpl
-import numpy
-
-# setQmax and setQmin for PDFGenerator?
 
 
 class PDFAdapter(BaseAdapter):
@@ -316,10 +310,8 @@ class PDFAdapter(BaseAdapter):
         return action_func
 
     def _residual(self, p=[]):
-        """
-        Residual function adapter from FitRecipe in order to capture
-        the intermediate results, the snapshots, during the iterations.
-        """
+        """Residual function adapter from FitRecipe in order to capture the
+        intermediate results, the snapshots, during the iterations."""
         # Prepare, if necessary
         self._recipe._prepare()
 
@@ -366,8 +358,8 @@ class PDFAdapter(BaseAdapter):
         return chiv
 
     def clone(self):
-        """Create a copy of the current PDFAdapter with the same inputs
-        and parameter values."""
+        """Create a copy of the current PDFAdapter with the same inputs and
+        parameter values."""
         adapter = PDFAdapter()
         adapter.load_inputs(self.inputs)
         adapter._apply_parameter_values(self._get_parameter_values())

@@ -7,7 +7,6 @@ import re
 import time
 import threading
 import networkx as nx
-import uuid
 
 
 class PDFFitLauncher:
@@ -38,7 +37,8 @@ class PDFFitLauncher:
         if self.profiles_known != files[: len(self.profiles_known)]:
             raise ValueError(
                 "Profiles order has changed. "
-                "Please ensure newer profiles are strictly have higher indices."
+                "Please ensure newer profiles are strictly have higher "
+                "indices."
             )
         self.profiles_known = files
         self.profiles_running = [
@@ -56,7 +56,7 @@ class PDFFitLauncher:
                 Path(self.profile_folder / start_from)
             )
             self.profiles_finished = self.profiles_known[:ind]
-            result_files = [file for file in self.dump_folder.glob(f"*.json")]
+            result_files = [file for file in self.dump_folder.glob("*.json")]
             result_to_profile_stem = [
                 re.findall(f"{self.dump_filename}_(.*).json", file.name)[0]
                 for file in result_files
@@ -116,7 +116,7 @@ class PDFFitLauncher:
         qmin,
         qmax,
         remove_vars,
-        filename_pattern: str = "(\d+)K\.gr",
+        filename_pattern: str = r"(\d+)K\.gr",
     ):
         self.profile_folder = profile_folder
         self.structure_file = structure_file
@@ -135,8 +135,7 @@ class PDFFitLauncher:
         }
 
     def watch(self, pname, when, **kwargs):
-        """
-        Moniter the results generated during the fit process.
+        """Moniter the results generated during the fit process.
 
         Parameters
         ----------
@@ -157,7 +156,10 @@ class PDFFitLauncher:
             Additional keyword arguments for the plot.
         """
         if when == "node end":
-            trigger_func = lambda dag, node_id: True
+
+            def trigger_func(dag, node_id):
+                return True
+
             source = "payload"
             update_mode = "append"
             style = "sparse"
@@ -170,7 +172,10 @@ class PDFFitLauncher:
             update_mode = "append"
             style = "sparse"
         elif when == "all":
-            trigger_func = lambda dag, node_id: True
+
+            def trigger_func(dag, node_id):
+                return True
+
             source = "adapter"
             update_mode = "replace"
             style = "dense"
@@ -193,8 +198,7 @@ class PDFFitLauncher:
         )
 
     def launch(self, mode="stream"):
-        """
-        Launch the fitting process.
+        """Launch the fitting process.
 
         Parameters
         ----------
@@ -212,7 +216,6 @@ class PDFFitLauncher:
             When start_from is specified, the preceding profiles should have
             been executed and their results should be available. If not,
             RuntimeError will be raised.
-
         """
         if mode == "stream":
 
@@ -256,7 +259,7 @@ if __name__ == "__main__":
         dump_folder=Path("example/results"),
         dump_filename="fit_results",
         template_dag=template_dag,
-        filename_pattern="(\d+)K\.gr",
+        filename_pattern=r"(\d+)K\.gr",
         xmin=1.5,
         xmax=50,
         dx=0.01,

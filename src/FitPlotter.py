@@ -1,7 +1,6 @@
 from FitRunner import FitRunner
 from PyQt5 import QtWidgets, QtCore
 import pyqtgraph as pg
-import numpy as np
 import sys
 
 

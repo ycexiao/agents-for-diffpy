@@ -1,12 +1,9 @@
-from itertools import chain
 import random
-import copy
 from diffpy.structure.parsers import getParser
 from diffpy.srfit.structure import struToParameterSet
 from diffpy.srfit.structure import constrainAsSpaceGroup
-from diffpy.srreal.pdfcalculator import DebyePDFCalculator, PDFCalculator
+from diffpy.srreal.pdfcalculator import PDFCalculator
 from diffpy.srfit.fitbase.parameter import ParameterAdapter
-import warnings
 
 
 class PDFexperiment:

@@ -1,3 +1,5 @@
+# flake8: noqa
+# Copied from https://github.com/Billingegroup/pdfttp_data
 """Please see notes in Chapter 3 of the 'PDF to the People' book for additonal
 explanation of the code.
 
@@ -370,13 +372,10 @@ def main():
     # and provides for a bit more stability.
     recipe.fix("all")
     tags = ["lat", "scale", "adp", "d2", "all"]
-    # tags = ["lat", "scale"]
-    strat_time = time.time()
 
     for tag in tags:
         recipe.free(tag)
         least_squares(recipe.residual, recipe.values, x_scale="jac")
-    end_time = time.time()
     for tag in tags:
         recipe.free(tag)
         least_squares(recipe.residual, recipe.values, x_scale="jac")
