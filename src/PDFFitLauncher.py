@@ -1,7 +1,9 @@
-from FitDAG import FitDAG
-from FitRunner import FitRunner
-from FitPlotter import FitPlotter
-from PDFAdapter import PDFAdapter
+from agents_for_diffpy.interface import (
+    FitDAG,
+    FitRunner,
+    FitPlotter,
+    PDFAdapter,
+)
 from pathlib import Path
 import re
 import time
