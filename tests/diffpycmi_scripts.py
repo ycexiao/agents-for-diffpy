@@ -127,16 +127,17 @@ def make_recipe(cif_path, dat_path):
             import psutil
             import multiprocessing
             from multiprocessing import Pool
+
+            syst_cores = multiprocessing.cpu_count()
+            cpu_percent = psutil.cpu_percent()
+            avail_cores = np.floor((100 - cpu_percent) / (100.0 / syst_cores))
+            ncpu = int(np.max([1, avail_cores]))
+            pool = Pool(processes=ncpu)
+            generator_crystal1.parallel(ncpu=ncpu, mapfunc=pool.map)
         except ImportError:
             print(
                 "\nYou don't appear to have the necessary packages for parallelization"
             )
-        syst_cores = multiprocessing.cpu_count()
-        cpu_percent = psutil.cpu_percent()
-        avail_cores = np.floor((100 - cpu_percent) / (100.0 / syst_cores))
-        ncpu = int(np.max([1, avail_cores]))
-        pool = Pool(processes=ncpu)
-        generator_crystal1.parallel(ncpu=ncpu, mapfunc=pool.map)
 
     # 13: Set the experimental profile, within the Fit Contribution object,
     # to the Profile object we created earlier.
