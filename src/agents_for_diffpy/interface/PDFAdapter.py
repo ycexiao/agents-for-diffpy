@@ -169,7 +169,8 @@ class PDFAdapter:
                 pdfgenerator.parallel(ncpu=ncpu, mapfunc=pool.map)
             except ImportError:
                 print(
-                    "\nYou don't appear to have the necessary packages for parallelization"
+                    "\nYou don't appear to have the necessary packages for "
+                    "parallelization"
                 )
         # find all parameters and add them to recipe variables
         for pname in [
